@@ -1,0 +1,22 @@
+# ── 파이썬 ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# ── 우리 도구가 만드는 것 ─────────────────────────────────
+*.sarif
+
+# ── macOS ────────────────────────────────────────────────
+.DS_Store
+
+# ── Claude Code 로컬 상태 ────────────────────────────────
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+.claude/worktrees/
