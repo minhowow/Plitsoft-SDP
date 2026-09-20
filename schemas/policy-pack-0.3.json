@@ -1,0 +1,559 @@
+{
+  "$defs": {
+    "AiCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/Evidence",
+          "default": "required"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "title": "AiCondition",
+      "type": "object"
+    },
+    "AppliesAi": {
+      "additionalProperties": false,
+      "description": "적용 판단을 AI에게 묻는 질문.\n\n정적 적용 판단이 '모름'일 때만 부른다. 적용의 '예'는 경고를 올리는 쪽이라 인용을 요구하지 않는다.\n적용 질문의 '아니오'는 인용 없이 규칙을 끄므로, 정적 조건이 이미 참인 곳에서는 묻지 않는다.",
+      "properties": {
+        "question": {
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "title": "AppliesAi",
+      "type": "object"
+    },
+    "Condition": {
+      "additionalProperties": false,
+      "description": "적용 조건 하나(applies-when 의 항목). Semgrep 조건만 받는다.\n\n적용 여부를 AI 에게 물으려면 규칙의 applies-ai 에 적는다. 여기 AI 조건을 두면 묻지 않고\n거짓이 되어 규칙이 꺼지므로 문법이 막는다.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "static": {
+          "additionalProperties": true,
+          "title": "Static",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "static"
+      ],
+      "title": "Condition",
+      "type": "object"
+    },
+    "Defaults": {
+      "additionalProperties": false,
+      "properties": {
+        "languages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Languages",
+          "type": "array"
+        }
+      },
+      "title": "Defaults",
+      "type": "object"
+    },
+    "Evidence": {
+      "description": "AI 대안의 '예'를 인정하는 조건. 어느 쪽이든 코드에 실제로 있는 줄을 인용해야 한다.\n\n인용이 틀리면 '거짓'이 아니라 '모름'이 되어 경고가 남는다 — 인용 관문의 비대칭.\nrequired  주석만 인용한 '예'는 받지 않는다. 코드 줄 끝에 붙은 주석은 떼고 본다\nstrict    인용을 한 글자도 고치지 않고 주석을 뗀 코드에서 찾는다. 끝에 주석이 붙은 줄을 통째로\n          인용해도 받지 않는다. '이 문구가 코드에 실제로 있는가'를 묻는 대안에 쓴다",
+      "enum": [
+        "required",
+        "strict"
+      ],
+      "title": "Evidence",
+      "type": "string"
+    },
+    "Legal": {
+      "additionalProperties": false,
+      "properties": {
+        "violated-when-failed": {
+          "items": {
+            "$ref": "#/$defs/LegalRef"
+          },
+          "minItems": 1,
+          "title": "Violated-When-Failed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "violated-when-failed"
+      ],
+      "title": "Legal",
+      "type": "object"
+    },
+    "LegalRef": {
+      "additionalProperties": false,
+      "description": "근거 조문.\n\n해시 대상은 원격 페이지가 아니라 저장소에 커밋한 원문 파일(`text-file`)이다.\n법제처 페이지 구조가 바뀌어도 검증이 깨지지 않게 하기 위해서다.",
+      "properties": {
+        "article": {
+          "title": "Article",
+          "type": "string"
+        },
+        "clause": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clause"
+        },
+        "effective-from": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Effective-From"
+        },
+        "law-id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Law-Id"
+        },
+        "statute": {
+          "title": "Statute",
+          "type": "string"
+        },
+        "text-file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text-File"
+        },
+        "text-retrieved": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text-Retrieved"
+        },
+        "text-sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text-Sha256"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "required": [
+        "statute",
+        "article"
+      ],
+      "title": "LegalRef",
+      "type": "object"
+    },
+    "OnUnsatisfied": {
+      "additionalProperties": false,
+      "description": "이 대안이 참이 아닐 때 사람에게 할 말.\n\n대안마다 따로 둔다. Kyverno 의 anyPattern 은 \"여러 형태 중 하나\"는 표현하지만\n어느 것이 왜 안 맞았는지는 말해 주지 못한다.",
+      "properties": {
+        "ask-developer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ask-Developer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "remediation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remediation"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "OnUnsatisfied",
+      "type": "object"
+    },
+    "PackMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "PackMeta",
+      "type": "object"
+    },
+    "Policy": {
+      "additionalProperties": false,
+      "properties": {
+        "ask-developer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ask-Developer"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "legal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Legal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rationale": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Rationale"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Review"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/Rule"
+          },
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "title",
+        "rules"
+      ],
+      "title": "Policy",
+      "type": "object"
+    },
+    "Predicate": {
+      "additionalProperties": false,
+      "description": "적법한 대안 하나(compliant-if-any 의 항목). static 과 ai 중 정확히 하나를 적는다.",
+      "properties": {
+        "ai": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AiCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "on-unsatisfied": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnUnsatisfied"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "static": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Static"
+        },
+        "strength": {
+          "$ref": "#/$defs/Strength",
+          "default": "strong"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Predicate",
+      "type": "object"
+    },
+    "Rationale": {
+      "additionalProperties": false,
+      "properties": {
+        "implementation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Implementation"
+        },
+        "motivation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Motivation"
+        }
+      },
+      "title": "Rationale",
+      "type": "object"
+    },
+    "Review": {
+      "additionalProperties": false,
+      "description": "재검토 기한. 지나면 validate 가 경고한다.\n\n법은 개정된다. 규칙이 언제 마지막으로 확인됐는지 모르면 조용히 낡는다.",
+      "properties": {
+        "review-by": {
+          "format": "date",
+          "title": "Review-By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "review-by"
+      ],
+      "title": "Review",
+      "type": "object"
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor-on": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor-On"
+        },
+        "applies-ai": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AppliesAi"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "applies-when": {
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "title": "Applies-When",
+          "type": "array"
+        },
+        "compliant-if-any": {
+          "items": {
+            "$ref": "#/$defs/Predicate"
+          },
+          "title": "Compliant-If-Any",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "languages": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Languages"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope",
+          "default": "file"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Rule",
+      "type": "object"
+    },
+    "Scope": {
+      "description": "판정 단위.\n\nfile    (정책, 규칙, 파일)마다 판정 하나. 기본값이다\nanchor  anchor-on 조건이 맞은 자리를 감싸는 가장 바깥 함수마다 판정 하나.\n        대안은 그 함수와 겹치는 매치만, AI 의 '예'는 그 함수 안의 줄 인용만 인정한다.\n        그래서 anchor 가 경고한 집합은 file 이 경고한 집합을 늘 포함한다(경고를 올리기만 한다)",
+      "enum": [
+        "file",
+        "anchor"
+      ],
+      "title": "Scope",
+      "type": "string"
+    },
+    "Strength": {
+      "description": "대안 근거의 강도.\n\nstrong 대안은 참이면 혼자 경고를 푼다.\nweak 는 이름·문자열만 보는 대안이다. 참이어도 혼자 경고를 풀지 못하고 같은 규칙의 AI 대안에게\n다시 묻는다. 판정자가 없거나 답하지 못하면 '모름'이 되어 불확실로 남는다.",
+      "enum": [
+        "strong",
+        "weak"
+      ],
+      "title": "Strength",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "defaults": {
+      "$ref": "#/$defs/Defaults"
+    },
+    "pack": {
+      "$ref": "#/$defs/PackMeta"
+    },
+    "policies": {
+      "items": {
+        "$ref": "#/$defs/Policy"
+      },
+      "minItems": 1,
+      "title": "Policies",
+      "type": "array"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "pack",
+    "policies"
+  ],
+  "title": "정책 팩 v0.3",
+  "type": "object"
+}
