@@ -1,0 +1,13 @@
+# 남이 policypack 을 pre-commit 훅으로 쓸 때의 정의.
+#
+# language: python 이라 JS/TS 저장소에서도 동작한다. pre-commit 이 자체 파이썬
+# 환경을 만들기 때문에 사용자는 파이썬을 의식하지 않는다.
+- id: policypack
+  name: 국내 법·정책 검토
+  description: 커밋하려는 코드에서 법·정책상 검토가 필요한 지점을 찾는다
+  entry: policypack scan
+  language: python
+  types_or: [javascript, jsx, ts, tsx]
+  # 바뀐 파일만 넘긴다. pre-commit 이 파일 목록을 인자로 붙여 준다.
+  pass_filenames: true
+  require_serial: false
