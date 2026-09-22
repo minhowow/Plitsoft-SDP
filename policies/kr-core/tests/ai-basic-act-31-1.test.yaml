@@ -1,0 +1,393 @@
+# yaml-language-server: $schema=../../../schemas/policy-test-0.1.json
+#
+# 생성형 AI 결과를 화면에 그리는 픽스처에는 제31조 제2항 정책(kr.ai-basic-act.31)도 걸린다.
+# 그 경우는 두 규칙의 기대를 함께 적는다. ② 의 기대는 결과물 표시가 있는지만 본 것이다.
+# 기대를 적지 않은 규칙은 '경고 없음'이 기대다(준수 또는 해당 없음).
+#
+# 이 정책의 정적 대안 셋(prior-notice-text·notice-component·notice-gate-flag)은 모두 약한 근거라
+# AI 확인 없이는 경고를 풀지 않는다. 그래서 그 대안의 픽스처에는 ai-prior-notice 스텁이 있고, 스텁은
+# 파일에 실제로 있는 줄을 인용할 때만 '예'다.
+apiVersion: policypack/test-0.1
+rule: kr.ai-basic-act.31-1/genai-feature-without-prior-notice
+cases:
+  # ── 위반 모양 ──────────────────────────────────────────────────────────────
+  - file: ai-basic-act-31-1/violating.tsx
+    note: AI SDK 의 useChat 채팅 화면. 제목은 '고객 상담'뿐이고 고지가 없다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/image-studio.tsx
+    note: 서버 액션에서 openai.images.generate. '썸네일 스튜디오'라는 이름으로는 AI 활용이 드러나지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+
+  # ── 대안마다 그 대안 하나로 풀리는 픽스처 ─────────────────────────────────
+  - file: ai-basic-act-31-1/prior-notice-text.tsx
+    note: 입력창 위의 고지 문단 (시행령 제23조 제1항 제2호)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-label: no
+      ai-machine-mark: no
+      ai-prior-notice: {answer: yes, cite: '이 상담 서비스는 생성형 인공지능(AI)을 기반으로 운영됩니다.'}
+  - file: ai-basic-act-31-1/prior-notice-text-en.tsx
+    note: 영어 고지. 법 제4조 제1항에 따라 국외 서비스도 국내 이용자에게 영향을 미치면 적용된다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-label: no
+      ai-machine-mark: no
+      ai-prior-notice: {answer: yes, cite: 'This help desk is powered by generative AI.'}
+  - file: ai-basic-act-31-1/notice-const-rendered.tsx
+    note: >
+      고지 문구를 상수(AI_NOTICE)에 두고 <p>{AI_NOTICE}</p> 로 조건 없이 그린다. 상수 대안은
+      선언만으로는 풀리지 않고 그 상수가 화면에 렌더링되어야 한다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-label: no
+      ai-machine-mark: no
+      ai-prior-notice: {answer: yes, cite: '<p role="note">{AI_NOTICE}</p>'}
+  - file: ai-basic-act-31-1/notice-component.tsx
+    note: >
+      자체 엔드포인트(/api/assistant)만 부르는 위젯. 고지는 가져온 AiDisclosureBanner 가 그린다
+      (같은 디렉터리의 AiDisclosureBanner.tsx). 이름만 본 약한 대안이라 판정자가 이 파일의
+      <AiDisclosureBanner /> 줄을 인용해야 풀린다. 배너 본문은 다른 파일이라 판정자에게 보이지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-label: no
+      ai-machine-mark: no
+      ai-prior-notice: {answer: yes, cite: '<AiDisclosureBanner />'}
+  - file: ai-basic-act-31-1/notice-gate-flag.tsx
+    note: >
+      AI 고지를 본 적이 없으면 안내 시트를 먼저 띄우고(return) 채팅으로 넘어가지 않는다. 플래그 이름만 본
+      약한 대안이라 판정자 확인이 필요하다. 그런데 안내 내용은 다른 파일(WelcomeSheet)에 있어 이 파일에는
+      'AI 기반'이라는 문구가 없다. 질문에 정직한 답은 '아니오'이고 경고가 남는다(terms-gate 와 같다)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/notice-gate-redirect.tsx
+    note: >
+      같은 분기를 return 이 아니라 router.replace 로 막는다. 분기 본문이 보내거나 돌려보내야
+      고지 확인 분기로 센다(list.push 같은 호출은 받지 않는다). 안내 내용은 /assistant/intro 에 있어
+      이 파일에는 없다. notice-gate-flag 처럼 정직한 답은 '아니오'다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/ai-prior-notice.tsx
+    note: >
+      정적 대안은 못 알아보는 이용 전 화면 문구. 서비스명('AI 이미지 생성기')만으로 풀지 않는다
+      (시행령 제23조 제4항 제1호는 사람이 판단한다). 판정자가 입력창 위 문구를 인용해야 풀린다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+      kr.ai-basic-act.31/ai-output-without-label: compliant
+    ai:
+      ai-prior-notice: {answer: yes, cite: "<p>문장을 입력하면 AI가 이미지를 그려 드립니다.</p>"}
+      ai-label: {answer: yes, cite: "<p>문장을 입력하면 AI가 이미지를 그려 드립니다.</p>"}
+      ai-machine-mark: no
+
+  # ── 해당 없음: 함정 ────────────────────────────────────────────────────────
+  - file: ai-basic-act-31-1/twilio-sms.tsx
+    note: Twilio 의 client.messages.create 는 Anthropic SDK 와 모양이 같다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/twilio-with-moderation.tsx
+    note: >
+      같은 Twilio 발송인데 이 파일은 OpenAI 도 가져온다(생성하지 않는 moderations 용). 받는 쪽
+      sms 를 twilio() 로 만들었으므로 AI 호출로 세지 않는다. 파일에 AI import 가 있다는 것만으로
+      묶으면 이 화면이 걸렸다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/stream-chat-support.tsx
+    note: >
+      Stream Chat 의 channel.sendMessage 는 Gemini 채팅 세션의 chat.sendMessage 와 모양이 같다.
+      @google 모듈에서 온 startChat·chats.create 로 만든 세션만 받는다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/raw-embeddings-search.tsx
+    note: >
+      제공자 URL 을 직접 부르지만 /v1/embeddings 라 생성하지 않는다(법 제2조 제5호). SDK 꼴
+      (semantic-search.tsx)뿐 아니라 이 꼴도 걸러야 한다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/openai-models-admin.tsx
+    note: 제공자 URL 의 /v1/models 는 모델 목록 조회다. 생성 호출이 아니다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/admin-ai-usage.tsx
+    note: >
+      /api/ai/usage 는 토큰 사용량 표다. 관리 화면의 하위 경로(usage·seats·billing 등)는
+      자체 엔드포인트 이름 규칙에서 뺀다. 제31조 제2항 규칙은 이름만 보는 문턱(/api/ai/)이 걸려
+      그대로 검토 필요로 남는다(알려진 오탐, 경고를 올리는 쪽)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: not-applicable
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/human-live-chat.tsx
+    note: 상담사(사람)와의 채팅. useChat 은 직접 만든 훅이다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/ai-course-page.tsx
+    note: >
+      AI 라는 말이 많이 나오지만 모델을 부르지 않는 강의 소개. 제31조 제2항 규칙은 이름
+      AiCoursePage 때문에 적용된다(이름만 보는 적용 조건의 한계, ai-basic-act-31/ai-course-page-nolabel.tsx
+      와 같다). 강의 소개의 '생성형 AI' 는 약한 문구 대안이라 혼자 경고를 풀지 못하고 판정자에게
+      다시 묻는다. 결과물 표시가 없으니 판정자는 '아니오'라 답하고 검토 필요로 남는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: not-applicable
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/chat-route.ts
+    note: 화면 없는 API 경로. 고지는 이 경로를 쓰는 화면(또는 약관·계약서)에서 본다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/ts-assertion-route.ts
+    note: .ts 파일의 타입 단언(return <any>...)은 JSX 가 아니다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/survey-responses.tsx
+    note: 설문 SDK 의 tf.responses.create 는 OpenAI Responses API 와 모양이 같다
+    expect: not-applicable
+  - file: ai-basic-act-31-1/semantic-search.tsx
+    note: OpenAI SDK 를 부르지만 임베딩이라 생성형 결과물을 만들지 않는다 (법 제2조 제5호)
+    expect: not-applicable
+
+  # ── 적용: 놓치던 생성 호출 모양 ────────────────────────────────────────────
+  - file: ai-basic-act-31-1/gemini-chat-session.tsx
+    note: >
+      @google/generative-ai 의 공식 채팅 꼴(model.startChat 뒤 chat.sendMessage). generateContent 만
+      보던 때는 이 화면이 통째로 빠졌다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/langchain-lcel.tsx
+    note: LangChain 의 표준 꼴인 LCEL 체인(prompt.pipe(...).pipe(...) 뒤 chain.invoke)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/bedrock-converse.tsx
+    note: Amazon Bedrock 의 ConverseCommand. 모델 이름이 파일에 없어도 명령 이름과 import 로 잡는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/rsc-actions.tsx
+    note: ai/rsc 의 useActions·useUIState 로 서버 액션의 생성 결과를 그리는 화면
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/lib-ai-helper.tsx
+    note: >
+      자체 AI 모듈의 도우미(@/lib/ai 의 summarizeReviews). 경로 이름만 본 약한 근거다.
+      제31조 제2항 규칙은 이 파일에 AI 라는 문자열이 없어 적용되지 않는다
+    expect: needs-review
+    ai: {ai-prior-notice: no}
+  - file: ai-basic-act-31-1/base-url-chat.tsx
+    note: 기준 URL 을 붙인 템플릿 문자열 `${API_BASE}/api/chat`
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/raw-provider-chat.tsx
+    note: 제공자 URL 을 직접 부르는 생성 호출(/v1/chat/completions). 생성하지 않는 경로만 뺐다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/draft-then-sms.tsx
+    note: >
+      anthropic.messages.create 로 문자 초안을 만들어 Twilio 로 보낸다. 같은 파일에 Twilio 가 있어도
+      받는 쪽이 AI 클라이언트면 그대로 적용된다(twilio-with-moderation.tsx 의 반대 짝)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+
+  # ── 검토 필요: 함정 ────────────────────────────────────────────────────────
+  - file: ai-basic-act-31-1/terms-gate.tsx
+    note: >
+      AI 약관 동의로 막는 경로(시행령 제23조 제1항 제1호 후보). 약관에 AI 기반 운용 사실이 적혀
+      있다는 근거가 주석과 이름뿐이라 풀지 않는다. 약관 조항은 사람이 확인한다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/terms-gate.tsx
+    id: terms-gate-comment-cite
+    note: >
+      같은 파일에 판정자가 '예'를 하고 4행 주석을 인용한 경우. 주석 인용은 받지 않는다. 인용 관문은
+      비대칭이라 '거짓'이 아니라 '모름'이 되고, 경고는 불확실로 남는다(exit 1)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review-uncertain
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-prior-notice: {answer: yes, cite: '약관 제7조: 본 서비스는 생성형 인공지능을 기반으로 운용됩니다'}
+      ai-label: no
+      ai-machine-mark: no
+  - file: ai-basic-act-31-1/terms-gate.tsx
+    id: terms-gate-fullline-cite
+    note: >
+      끝에 주석이 붙은 4행을 통째로 인용한 경우. required 는 주석을 떼고 남은 import 줄이 코드에 있어
+      받지만, strict 는 인용을 한 글자도 고치지 않고 주석 없는 코드에서 찾으므로 받지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review-uncertain
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-prior-notice:
+        answer: yes
+        cite: 'import { AI_SERVICE_TERMS_VERSION } from "@/lib/terms"; // 약관 제7조: 본 서비스는 생성형 인공지능을 기반으로 운용됩니다'
+      ai-label: no
+      ai-machine-mark: no
+  - file: ai-basic-act-31-1/result-badge-only.tsx
+    note: >
+      답변마다 'AI 생성' 배지(제2항)는 있지만 첫 답변 전에는 아무것도 보이지 않는다. 제2항 규칙의 배지
+      문구는 약한 대안이라 판정자가 그 줄을 인용해 확인한다
+    expect: needs-review
+    ai:
+      ai-prior-notice: no
+      kr.ai-basic-act.31/ai-output-without-label/ai-label:
+        answer: yes
+        cite: '{m.role === "assistant" && <span className="badge">AI 생성</span>}'
+      kr.ai-basic-act.31/ai-output-without-label/ai-machine-mark: no
+  - file: ai-basic-act-31-1/notice-flag-off.tsx
+    note: 고지 배너가 꺼진 플래그 뒤에 있다(&& 꼴)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/ternary-flag-off-component.tsx
+    note: '같은 함정의 삼항 꼴 `{showAiNotice ? <AiNoticeBanner /> : null}`. 플래그는 상수 false 다'
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/ternary-flag-off-text.tsx
+    note: 같은 함정의 삼항 + 문구 꼴. 상수 false 플래그 뒤의 고지는 이용자에게 보이지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/notice-flag-off-if.tsx
+    note: >
+      같은 함정의 if 꼴. 진입을 막기는 하지만 플래그가 상수 false 라 고지 모달이 뜨지 않는다.
+      notice-gate-flag 는 상수로 정해진 플래그를 받지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/notice-after-first-reply.tsx
+    note: >
+      고지가 첫 응답 뒤에만 뜬다(messages.length > 0 삼항). 사전 고지가 아니다 —
+      ai-prior-notice 질문도 '첫 응답 뒤에 뜨는 안내'를 받지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/notice-const-unrendered.tsx
+    note: >
+      고지 문구를 상수로 선언만 하고 어디에도 그리지 않는다. 결과 옆 문구(replyNotice)는 조건부라
+      역시 사전 고지가 아니다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/hidden-notice.tsx
+    note: >
+      고지 문구가 hidden·aria-hidden·display:none·sr-only 뒤에 있다. 이용자 화면에 표시(시행령
+      제23조 제1항 제2호)된 것으로 보지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/meta-description-only.tsx
+    note: >
+      AI 라는 말이 <title>·<meta content>·alt·aria-label 에만 있다. 화면에 보이는 글이 아니다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/notice-commented-out.tsx
+    note: 고지 문단이 JSX 주석으로 막혀 있다. 주석 걸러 내기는 유지한다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/accept-image-comment.tsx
+    note: >
+      accept="image/*" 뒤에 진짜 고지가 있고 그 뒤에 JSX 주석이 온다. 주석 정규식이 문자열 안의
+      `/*` 를 주석 시작으로 읽어 고지를 통째로 지웠다(이미지 생성 화면에 흔한 모양)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai:
+      ai-label: no
+      ai-machine-mark: no
+      ai-prior-notice: {answer: yes, cite: '이 서비스는 생성형 인공지능을 기반으로 운영됩니다.'}
+  - file: ai-basic-act-31-1/empty-state-notice.tsx
+    note: >
+      빈 화면에만 뜨는 올바른 고지(messages.length === 0 &&). 조건부라 정적 대안으로는 풀지 못하고
+      판정자가 조건을 읽어야 한다 — 경고를 올리는 쪽의 오류다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/assistant-intro-greeting.tsx
+    note: >
+      <AssistantIntro /> 는 인사말만 그린다. 이름 꼬리 Intro 와 Assistant 조합은 고지 컴포넌트로
+      받지 않는다(Assistant·Chatbot 은 Notice·Disclosure·Disclaimer 가 붙어야 받는다)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/skip-flag-gate.tsx
+    note: >
+      skipAiIntro 는 뜻이 뒤집힌 이름이고, hasSeenAiNotice 의 if 는 분석 이벤트만 보낸다.
+      진입을 막지 않는 분기와 뒤집힌 이름은 고지 확인 분기로 세지 않는다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/cta-use-ai.tsx
+    note: >
+      'Use AI to rewrite' 는 AI 를 쓴다는 버튼 문구일 뿐 이 기능이 인공지능에 기반하여 운용된다는
+      고지가 아니다. 시행령 제23조 제4항 제1호('명백한 경우')인지는 사람이 판단한다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/internal-staff-tool.tsx
+    note: >
+      직원 전용으로 보이지만 role 검사는 이름 근거다. 내부 업무 용도(시행령 제23조 제4항 제2호)인지는
+      사람이 판단한다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/build-time-summary.tsx
+    note: >
+      빌드·재검증 때 만든 요약을 글 위에 보여 준다. 이용자가 AI 와 주고받지는 않지만 생성형 결과를
+      제공하는 화면이다. 인공지능사업자(법 제2조 제7호)의 서비스인지는 사람이 판단한다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31-1/answer-label.tsx
+    note: '"AI를 활용한 답변입니다"는 답변마다 붙는 결과 표시(제2항)다. 사전 고지로 세지 않는다'
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: compliant
+    ai:
+      ai-prior-notice: no
+      ai-label: {answer: yes, cite: '{m.role === "assistant" && <small>AI를 활용한 답변입니다</small>}'}
+      ai-machine-mark: no
+  - file: ai-basic-act-31-1/cookie-gate.tsx
+    note: 쿠키 동의로 막는 분기는 AI 고지 확인이 아니다
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
