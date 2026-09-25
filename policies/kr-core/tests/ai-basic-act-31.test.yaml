@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../../schemas/policy-test-0.1.json
+apiVersion: policypack/test-0.1
+rule: kr.ai-basic-act.31/ai-output-without-label
+cases:
+  - file: ai-basic-act-31/violating.tsx
+    expect: needs-review
+    ai: {ai-label: no, ai-machine-mark: no}
+  - file: ai-basic-act-31/label-text.tsx
+    note: 표시 문구는 약한 대안이라 판정자가 그 줄을 인용해 확인한다
+    expect: compliant
+    ai:
+      ai-label: {answer: yes, cite: '<small>AI가 생성한 요약입니다</small>'}
+      ai-machine-mark: no
+  - file: ai-basic-act-31/ai-label.tsx
+    expect: compliant
+    ai:
+      ai-label: {answer: yes, cite: '<GeneratedContentBadge kind="summary" />'}
+      ai-machine-mark: no
+  - file: ai-basic-act-31/no-ai.tsx
+    expect: not-applicable
+
+  # 알려진 오탐 — 적용 조건 ai-source 가 이름 AiCoursePage 에 걸린다. 모델을 부르지 않는
+  # 강의 소개인데 검토 필요가 된다. 경고를 올리는 쪽이라 그대로 두고, 이렇게 픽스처로 적어 둔다.
+  # 같은 화면에 '생성형 AI' 문구가 있어도 약한 문구 대안이라 판정자가 결과물 표시를 확인해야 풀린다
+  # (ai-basic-act-31-1/ai-course-page.tsx)
+  - file: ai-basic-act-31/ai-course-page-nolabel.tsx
+    note: AI 를 부르지 않는 강의 소개. 표시 문구까지 없으면 이름만으로 검토 필요가 된다
+    expect: needs-review
+    ai: {ai-label: no, ai-machine-mark: no}
+
+  # 시행령 제23조 제2항 제2호: 기계 판독 표시 + 1회 이상 안내
+  - file: ai-basic-act-31/ai-machine-mark.tsx
+    note: >
+      결과물 옆 표시는 없다. 이미지 파일에 IPTC DigitalSourceType 을 넣고, 처음 한 번 안내 문구를
+      띄운다. 안내 문구는 label-text 의 어휘가 아니다. 그 안내는 이용 전에 뜨고 이 기능이 인공지능
+      모델로 운용된다고 말하므로 사전 고지(시행령 제23조 제1항 제2호)도 된다
+    expect:
+      kr.ai-basic-act.31/ai-output-without-label: compliant
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: compliant
+    ai:
+      ai-label: no
+      ai-machine-mark: {answer: yes, cite: '.withXmp(xmpFor("gpt-image-1"))'}
+      ai-prior-notice: {answer: yes, cite: '이 페이지의 포스터 이미지는 인공지능 모델이 그리며, 이미지 파일의 메타데이터에 그 사실이 기록됩니다.'}
+
+  # 함정 — 표시만 있고 안내가 없으면 2호가 아니다
+  - file: ai-basic-act-31/machine-mark-no-notice.tsx
+    note: 기계 판독 표시는 있지만 1회 이상의 안내 문구·음성이 없다. 이용 전 고지도 없다
+    expect:
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+    ai: {ai-label: no, ai-machine-mark: no, ai-prior-notice: no}
+  - file: ai-basic-act-31/mark-in-lib.ts
+    note: >
+      화면이 없는 서버 lib 파일이다. 이 규칙은 결과물을 렌더링하는 화면만 본다(renders-jsx). 그래서
+      표시만 넣고 안내가 없어도 여기서는 해당 없음이다
+    expect: not-applicable
+
+  # 함정 — 이름에 ai 가 들어간다고 생성형 AI 화면이 아니다
+  - file: ai-basic-act-31/airplane-and-font.tsx
+    note: Airplane·aim 과 글꼴 이름 Assistant 는 AI 신호가 아니다
+    expect: not-applicable

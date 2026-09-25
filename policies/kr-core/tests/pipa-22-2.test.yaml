@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../../../schemas/policy-test-0.1.json
+apiVersion: policypack/test-0.1
+rule: kr.pipa.22-2/signup-without-guard
+cases:
+  - file: pipa-22-2/violating.ts
+    note: 생년월일을 받는데 아무 확인 없이 가입시킨다
+    expect: needs-review
+    ai:
+      ai-guard: no
+  - file: pipa-22-2/under14-branch.ts
+    expect: compliant
+  - file: pipa-22-2/password-length.ts
+    note: >
+      가입 코드의 '< 14' 는 비밀번호 길이 검사다. 연령 분기로 읽으면 안 된다
+    decoy-for: [under14-branch]
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/user-agent-length.ts
+    note: >
+      가입 코드의 '< 14' 는 User-Agent 길이 검사다. 이름 속 age(agent)를 나이로 읽으면 안 된다
+    decoy-for: [under14-branch]
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/domain-age.ts
+    note: >
+      '< 14' 는 이메일 도메인이 생긴 지 며칠인지다(일회용 메일 거르기). 이름 끝의 Age(domainAge)는
+      사람의 나이가 아니다
+    decoy-for: [under14-branch]
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/age-branch-logs-only.ts
+    note: 만 14세 미만이면 기록만 남기고 그대로 가입시킨다. 분기가 막지 않으면 준수가 아니다
+    decoy-for: [under14-branch]
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/under14-years.ts
+    note: 만 나이를 date-fns 의 differenceInYears 로 재서 years 에 담았다
+    expect: compliant
+  - file: pipa-22-2/guardian-call.ts
+    note: >
+      이름만 본 약한 대안(guardian-call)은 혼자 풀지 못한다. 판정자가 보호자 동의 확인 줄을 인용해야 풀린다
+    expect: compliant
+    ai:
+      ai-guard: {answer: yes, cite: 'await verifyGuardianConsent(body.birthDate, body.guardianToken);'}
+  - file: pipa-22-2/ai-guard.ts
+    note: 정적 대안이 못 알아보는 적법 구현. AI 가 실재하는 줄을 인용해야 해제된다
+    expect: compliant
+    ai:
+      ai-guard:
+        answer: yes
+        cite: 'if (isMinor(body.birthDate)) return res.status(403).json({ error: "MINOR" });'
+  - file: pipa-22-2/no-birth.ts
+    expect: not-applicable
+  - file: pipa-22-2/cache-header-and-join.ts
+    note: Cache-Control 의 max-age 와 배열 .join() 은 가입·나이 신호가 아니다
+    expect: not-applicable
