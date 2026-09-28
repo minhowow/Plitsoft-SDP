@@ -1,0 +1,258 @@
+# yaml-language-server: $schema=../../../schemas/policy-test-0.1.json
+apiVersion: policypack/test-0.1
+rule: kr.network-act.50-3/ad-send-without-night-guard
+cases:
+  - file: network-act-50-3/violating.ts
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/daytime-schedule.ts
+    expect: compliant
+  - file: network-act-50-3/night-consent-field.ts
+    note: 야간 동의 필드는 이름만 본 약한 대안이라 판정자가 그 줄을 인용해 확인한다
+    expect: compliant
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: 'const targets = await db.member.findMany({ where: { marketingAgreed: true, nightConsent: true } });'
+  - file: network-act-50-3/night-hour-block.ts
+    expect: compliant
+  - file: network-act-50-3/night-send-inside-block.ts
+    note: 야간 시간 검사가 있지만 그 블록 안에서 광고를 보낸다. 곧 야간에만 보내는 코드다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-nested-continue.ts
+    note: >
+      야간 블록 안의 continue 가 안쪽 if(전화번호 없음)의 것이다. 야간에도 번호가 있으면 보낸다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-helper-returns-true.ts
+    note: 야간이면 true 를 돌려주는 도우미는 스스로 막지 않는다. 쓰는 쪽이 경고만 남기고 보낸다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-utc-hours.ts
+    note: UTC 21~8시는 한국 시각 6~17시다. 한국의 야간(UTC 12~23시)에는 막지 않는다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-push-inside-block.ts
+    note: >
+      야간 블록 안에서 푸시로 광고를 보내고 빠져나간다. 블록 안에서는 로그·지표·응답 호출만 받는다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-helper-returns-string.ts
+    note: 야간이면 "night" 를 돌려주는 도우미. 쓰는 쪽은 경고만 남기고 보낸다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-dayjs-utc.ts
+    note: dayjs.utc() 의 시(hour)는 UTC 다. 한국의 야간(UTC 12~23시)에는 막지 않는다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-string-semicolon.ts
+    note: 블록에 빠져나가는 문장이 없다. 로그 문자열 속의 '; continue' 는 문장이 아니다
+    decoy-for: [night-hour-block]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/night-else-branch-send.ts
+    note: 야간이면 빠져나가고, 발송은 else 쪽에서 한다
+    expect: compliant
+  - file: network-act-50-3/night-route-403.ts
+    note: 야간이면 403 응답을 돌려주고 끝난다. 응답의 res.send 는 광고 발송이 아니다
+    expect: compliant
+  - file: network-act-50-3/ai-night-guard.ts
+    expect: compliant
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: "if (!isDaytimeInSeoul(new Date())) return deferUntilMorning(campaign);"
+  - file: network-act-50-3/no-ad-marker.ts
+    note: 거래 알림은 광고가 아니다
+    expect: not-applicable
+
+  # 제50조③ 단서 · 시행령 제61조②: 전자우편은 야간 별도 동의의 예외 매체다
+  - file: network-act-50-3/email-only.ts
+    note: nodemailer sendMail 로만 보낸다
+    # 제50조 ④ 도 적용된다. 본문이 다른 파일(renderCampaign·템플릿)에서 오거나 영어 안내가 없어
+    # 전송자 정보와 수신거부 안내(별표 6 전자우편 2.가·나)를 이 파일에서 확인할 수 없다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-body-sender: no, ai-body-optout: no}
+  - file: network-act-50-3/email-only-ses.ts
+    note: SES v3. 바로 앞 문장에서 만든 SendEmailCommand 를 보낸다
+    # 제50조 ④ 도 적용된다. 본문이 다른 파일(renderCampaign·템플릿)에서 오거나 영어 안내가 없어
+    # 전송자 정보와 수신거부 안내(별표 6 전자우편 2.가·나)를 이 파일에서 확인할 수 없다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-body-sender: no, ai-body-optout: no}
+  - file: network-act-50-3/email-only-sendgrid.ts
+    note: SendGrid 공식 예제 꼴. 바로 앞 문장에서 subject·html 객체를 만들어 보낸다
+    # 제50조 ④ 도 적용된다. 본문이 다른 파일(renderCampaign·템플릿)에서 오거나 영어 안내가 없어
+    # 전송자 정보와 수신거부 안내(별표 6 전자우편 2.가·나)를 이 파일에서 확인할 수 없다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-body-sender: no, ai-body-optout: no}
+  - file: network-act-50-3/email-only-resend.ts
+    note: Resend emails.send. html 없이 text 만 써도 SDK 모양으로 알아본다
+    # 제50조 ④ 도 적용된다. 본문이 다른 파일(renderCampaign·템플릿)에서 오거나 영어 안내가 없어
+    # 전송자 정보와 수신거부 안내(별표 6 전자우편 2.가·나)를 이 파일에서 확인할 수 없다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-body-sender: no, ai-body-optout: no}
+  - file: network-act-50-3/mixed-sms-email.ts
+    note: 전자우편과 문자를 함께 보낸다. 문자는 예외가 아니므로 그대로 적용된다
+    # 제50조 ④ 도 적용된다. 본문이 다른 파일(renderCampaign·템플릿)에서 오거나 영어 안내가 없어
+    # 전송자 정보와 수신거부 안내(별표 6 전자우편 2.가·나)를 이 파일에서 확인할 수 없다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-night-guard: no, ai-body-sender: no, ai-body-optout: no}
+
+  # 함정 — 전자우편 제외가 문자를 삼키면 안 된다
+  - file: network-act-50-3/mixed-command-before-sms.ts
+    note: >
+      전자우편 명령을 만들고, 문자를 보내고, 그다음 명령을 보낸다. 명령과 발송 사이를 `...` 로 잇는
+      pattern-not-inside 는 그 사이의 문자 발송까지 지웠다(실측). 바로 붙은 두 문장만 빼야 한다
+    # 제50조 ④ 도 적용된다. 본문이 다른 파일(renderCampaign·템플릿)에서 오거나 영어 안내가 없어
+    # 전송자 정보와 수신거부 안내(별표 6 전자우편 2.가·나)를 이 파일에서 확인할 수 없다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-night-guard: no, ai-body-sender: no, ai-body-optout: no}
+  - file: network-act-50-3/lms-subject.ts
+    note: 솔라피 LMS 도 subject 를 받는다. subject 로 전자우편을 가리면 문자가 예외가 된다
+    # 제50조 ④ 도 적용된다. 시작 부분에 (광고)와 명칭은 있지만 전화번호·주소가 없다(별표 6 2.가).
+    # 끝 부분의 "무료거부 080-..." 는 비용 부담 없는 수신거부 번호다(2.나)
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: needs-review
+      kr.network-act.50-4/nonemail-end-optout: compliant
+    ai: {ai-night-guard: no, ai-start-block: no, ai-optout-free: {answer: yes, cite: 'text: `(광고) 가나다몰 ${campaign.body}\n무료거부 080-XXX-XXXX`,'}}
+  - file: network-act-50-3/sms-batch.ts
+    note: 솔라피 묶음 발송은 send([...]) 꼴이다. 배열 인자로 SendGrid 를 가리면 문자가 예외가 된다
+    # 제50조 ④ 도 적용된다. 시작 부분에 (광고)와 명칭은 있지만 전화번호·주소가 없다(별표 6 2.가).
+    # 끝 부분의 "무료거부 080-..." 는 비용 부담 없는 수신거부 번호다(2.나)
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: needs-review
+      kr.network-act.50-4/nonemail-end-optout: compliant
+    ai: {ai-night-guard: no, ai-start-block: no, ai-optout-free: {answer: yes, cite: '...groupA.map((m) => ({ to: m.phone, from: SENDER, text: `(광고) 가나다몰 ${campaign.titleA} 무료거부 080-XXX-XXXX` })),'}}
+  - file: network-act-50-3/newsletter-wrapper.ts
+    note: >
+      이름만으로는 매체를 확정하지 않는다. 래퍼가 전자우편만 보낸다면 개발자가 ask-developer 에
+      답하고 사람이 닫는다
+    expect: needs-review
+    ai: {ai-night-guard: no}
+
+  # ── 전자우편과 함께 보내는 문자·푸시 ─────────────────────────────────────────
+  # 이름이 send* 가 아닌 발송(Twilio messages.create, OneSignal createNotification, 게이트웨이로 가는
+  # axios.post)은 send-call (가) 갈래에 맞지 않는다. (가) 가 전자우편 호출을 빼고 나면 남는 발송이
+  # 없으므로 (나) 갈래가 이 셋을 잡는다
+  - file: network-act-50-3/mixed-email-twilio.ts
+    note: SendGrid 메일과 Twilio messages.create 문자를 함께 보낸다. 문자는 예외 매체가 아니다
+    # 제50조 ④ 도 적용된다. 문자는 시작·끝 표기를 갖췄고, 메일 본문은 다른 파일(renderDeal)에서 온다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: compliant
+      kr.network-act.50-4/nonemail-end-optout: compliant
+      kr.network-act.50-4/email-subject-label: compliant
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai: {ai-night-guard: no, ai-body-sender: no, ai-body-optout: no}
+  - file: network-act-50-3/mixed-email-onesignal.ts
+    note: Resend 메일과 OneSignal createNotification 푸시를 함께 보낸다
+    # 제50조 ④ 도 적용된다. 푸시 문구는 contents.ko 안에 있어 정적 대안(text·body·content)이 보지 못한다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: compliant
+      kr.network-act.50-4/nonemail-end-optout: compliant
+      kr.network-act.50-4/email-subject-label: compliant
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai:
+      ai-night-guard: no
+      ai-body-sender: no
+      ai-body-optout: no
+      ai-start-block:
+        answer: yes
+        cite: 'n.contents = { ko: `(광고) 가나다몰 02-123-4567 ${title} 무료거부 080-123-4567` };'
+      ai-optout-free:
+        answer: yes
+        cite: 'n.contents = { ko: `(광고) 가나다몰 02-123-4567 ${title} 무료거부 080-123-4567` };'
+  - file: network-act-50-3/mixed-email-sens-helper.ts
+    note: nodemailer 메일과, 같은 파일의 헬퍼가 NCP SENS 로 보내는 문자를 함께 보낸다
+    # 제50조 ④ 도 적용된다. 문구는 헬퍼 인자로 넘어가 정적 대안이 보지 못한다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: compliant
+      kr.network-act.50-4/nonemail-end-optout: compliant
+      kr.network-act.50-4/email-subject-label: compliant
+      kr.network-act.50-4/email-body-sender: needs-review
+      kr.network-act.50-4/email-body-optout: needs-review
+    ai:
+      ai-night-guard: no
+      ai-body-sender: no
+      ai-body-optout: no
+      ai-start-block:
+        answer: yes
+        cite: 'await smsTo(m.phone, `(광고) 가나다몰 02-123-4567\n${title}\n무료거부 080-123-4567`);'
+      ai-optout-free:
+        answer: yes
+        cite: 'await smsTo(m.phone, `(광고) 가나다몰 02-123-4567\n${title}\n무료거부 080-123-4567`);'
+  - file: network-act-50-3/twilio-sms-only.ts
+    note: Twilio 문자만 보낸다. 이름이 send* 가 아니어도 매체가 드러나면 발송이다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: compliant
+      kr.network-act.50-4/nonemail-end-optout: compliant
+    ai: {ai-night-guard: no}
+
+  # ── 여섯 칸 cron 은 셋째 칸이 시다 ─────────────────────────────────────────
+  - file: network-act-50-3/schedule-seconds-night.ts
+    note: node-cron 의 여섯 칸 식 "0 15 22 * * *" 는 22시 15분이다. 둘째 칸 15 를 시로 읽으면 안 된다
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-seconds-daytime.ts
+    note: 같은 여섯 칸 식이라도 "0 0 10 * * *" 는 오전 10시 고정이다
+    expect: compliant
+
+  # ── 표시를 비튼 광고도 광고다 ────────────────────────────────────────────────
+  - file: network-act-50-3/label-variant.ts
+    note: '빈칸을 넣은 ''[광 고]'' 표시도 광고 표시다. 표기를 비틀어도 규칙이 꺼지면 안 된다'
+    expect: needs-review
+    ai: {ai-night-guard: no}
+
+  # ── 받는 쪽이 드러난, 수신자에게 보내지 않는 호출 ─────────────────────────────
+  - file: network-act-50-3/sponsored-card.tsx
+    note: 화면 안의 (광고) 배지와 router.push 다. 수신자에게 전송하는 것이 아니다
+    expect: not-applicable
+  - file: network-act-50-3/banner-route.ts
+    note: res.send 는 HTTP 응답이다. 경로 처리기의 인자로 묶어서 뺀다(이름이 res 여서가 아니다)
+    expect: not-applicable
+  - file: network-act-50-3/ws-feed.ts
+    note: 웹소켓 연결 처리기의 인자로 들어온 ws 의 send 다
+    expect: not-applicable
+  - file: network-act-50-3/list-push.ts
+    note: 배열 리터럴에 담는 push 다. 이름이 push 로 시작한다고 발송이 아니다
+    expect: not-applicable
+  - file: network-act-50-3/router-and-sms.tsx
+    note: >
+      같은 함수 안에 useRouter 의 push 와 문자 발송이 함께 있다. 제외 구역이 $X 로 묶여 있어
+      라우터 호출만 빠지고 문자 발송은 남는다
+    expect: needs-review
+    ai: {ai-night-guard: no}
