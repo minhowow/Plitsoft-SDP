@@ -449,7 +449,7 @@ class EvalResult:
 
     사용자가 알아야 한다. 경고가 없다는 것이 "문제가 없다"가 아니라 "못 봤다"일 수 있다."""
     skipped: list[str] = field(default_factory=list)
-    """검사하지 않은 파일(1MB 초과, 축소 번들, 읽을 수 없는 파일)."""
+    """검사하지 않은 파일(까닭은 discover.SKIPPED_REASONS)."""
     incomplete: list[str] = field(default_factory=list)
     """엔진이 정책 조건을 끝까지 돌리지 못한 판정 대상 파일(시간 초과·메모리 부족 등). 파싱 실패와 다르다."""
     engine_errors: list[str] = field(default_factory=list)

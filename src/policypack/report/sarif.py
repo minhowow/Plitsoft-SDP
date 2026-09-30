@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 
 from policypack import __version__
+from policypack.discover import SKIPPED_REASONS
 from policypack.evaluate.engine import EvalResult
 from policypack.model import LegalRef, Policy, PolicyPack
 from policypack.report.fingerprint import VERSION as FP_VERSION
@@ -186,10 +187,7 @@ def _gaps(result: EvalResult, root: Path | None) -> list[dict]:
 
     unparsed = "파싱하지 못했습니다. 이 파일의 구문 조건은 확인되지 않았습니다."
     out = [note("unparsed", p, unparsed) for p in result.unparsed]
-    out += [
-        note("skipped", p, "검사하지 않았습니다(1MB 초과·축소 번들·읽을 수 없는 파일·엔진이 읽지 못하는 확장자).")
-        for p in result.skipped
-    ]
+    out += [note("skipped", p, f"검사하지 않았습니다({SKIPPED_REASONS}).") for p in result.skipped]
     incomplete = "엔진이 이 파일에서 정책 조건을 끝내지 못했습니다(시간 초과 등). 파일 문법 문제가 아닙니다."
     out += [note("engine-incomplete", p, incomplete) for p in result.incomplete]
     if result.ai_pending:

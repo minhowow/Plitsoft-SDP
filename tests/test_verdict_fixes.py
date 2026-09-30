@@ -290,6 +290,89 @@ def test_a_fixture_the_engine_cannot_read_is_rejected(tmp_path):
         load_test_file(suite, load_pack(KR), tmp_path)
 
 
+# ── 인코딩 ─────────────────────────────────────────────────────────────────
+
+
+def test_files_that_are_not_utf8_are_reported_as_unscanned(tmp_path):
+    """Semgrep 1.176.1 의 정규식 조건은 UTF-8 이 아닌 파일에서 오류 없이 아무것도 찾지 않는다. kr-core 의 적용
+    조건은 모두 정규식이라 그런 파일이 '문제 없음'이 됐다. 폴더로 만나든 이름을 대든 검사한 것으로 세지 않는다."""
+    from policypack.discover import admit, discover
+
+    (tmp_path / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
+    (tmp_path / "euckr.ts").write_bytes("// 가입 처리\nexport const b = 1;\n".encode("euc-kr"))
+    (tmp_path / "latin1.ts").write_bytes(b"// caf\xe9\nexport const c = 1;\n")
+    found = discover([tmp_path], ["typescript"], use_git=False)
+    assert [p.name for p in found.files] == ["a.ts"]
+    assert sorted(p.name for p in found.skipped_encoding) == ["euckr.ts", "latin1.ts"]
+    named = discover([tmp_path / "latin1.ts"], ["typescript"], use_git=False)
+    assert named.files == [] and [p.name for p in named.skipped_files()] == ["latin1.ts"]
+    assert admit(tmp_path / "euckr.ts", tmp_path, {".ts"}) == "encoding"  # --staged·--diff 도 같은 규칙
+
+
+def test_a_non_utf8_violation_is_not_reported_clean(tmp_path, monkeypatch, capsys):
+    """위반 픽스처 앞에 Latin-1 한 바이트짜리 주석만 붙여도 exit 0 '검토할 것 없음'이었다(실측)."""
+    from policypack.cli import main
+
+    src = (KR / "tests/pipa-22-2/violating.ts").read_bytes()
+    (tmp_path / "signup.ts").write_bytes(b"// caf\xe9\n" + src)
+    monkeypatch.chdir(tmp_path)
+    assert main(["scan", "signup.ts", "--output-format", "json"]) == 1, "보지 못한 코드는 '불확실'처럼 센다"
+    out, err = capsys.readouterr()
+    run = json.loads(out)["run"]
+    assert run["skipped"] == ["signup.ts"] and run["coverage_complete"] is False
+    assert "UTF-8 이 아닌 파일 1개" in err
+    assert main(["scan", "signup.ts", "--fail-on", "review"]) == 0
+
+
+def test_skipped_files_carry_every_reason_in_reports(tmp_path, monkeypatch, capsys):
+    """건너뛴 까닭 목록을 보고서마다 따로 적어서, UTF-8 을 더할 때 글·SARIF 가 옛 목록을 적었다(검토에서 실측)."""
+    from policypack.cli import main
+
+    (tmp_path / "ok.ts").write_text("export const a = 1;\n", encoding="utf-8")
+    (tmp_path / "latin1.ts").write_bytes(b"// caf\xe9\nexport const c = 1;\n")
+    monkeypatch.chdir(tmp_path)
+    main(["scan", ".", "--output-format", "sarif"])
+    notes = json.loads(capsys.readouterr().out)["runs"][0]["invocations"][0]["toolExecutionNotifications"]
+    assert any("UTF-8 이 아닌 파일" in n["message"]["text"] for n in notes)
+    main(["scan", ".", "--no-color"])
+    assert "UTF-8 이 아닌 파일" in capsys.readouterr().out
+
+
+def test_a_named_unreadable_file_does_not_abort_the_scan(tmp_path):
+    """이름을 댄 파일도 읽을 권한을 본다. semgrep 은 읽을 수 없는 대상이 하나라도 있으면 출력 없이 끝났다."""
+    import os
+
+    from policypack.discover import discover
+
+    ok, locked = tmp_path / "ok.ts", tmp_path / "locked.ts"
+    for f in (ok, locked):
+        f.write_text("export const a = 1;\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        if os.access(locked, os.R_OK):
+            pytest.skip("권한을 무시하는 사용자(root)로 돈다")
+        found = discover([ok, locked], ["typescript"], use_git=False)
+        assert [p.name for p in found.files] == ["ok.ts"]
+        assert [p.name for p in found.skipped_unreadable] == ["locked.ts"]
+    finally:
+        locked.chmod(0o644)
+
+
+def test_a_fixture_that_is_not_utf8_is_rejected(tmp_path):
+    from policypack.errors import PackError
+    from policypack.packtest import load_test_file
+
+    (tmp_path / "v.ts").write_bytes(b"// caf\xe9\nexport const a = 1;\n")
+    suite = tmp_path / "t.test.yaml"
+    suite.write_text(
+        "apiVersion: policypack/test-0.1\nrule: kr.pipa.22-2/signup-without-guard\n"
+        "cases:\n  - file: v.ts\n    expect: needs-review\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(PackError, match="UTF-8 이 아니라"):
+        load_test_file(suite, load_pack(KR), tmp_path)
+
+
 def test_every_language_glob_is_really_read_by_the_pinned_engine(tmp_path):
     """LANGUAGE_GLOBS 의 확장자마다 언어 규칙이 실제로 매치해야 한다. 안 읽는 확장자를 넣으면 조용히 '거짓'이 된다."""
     from policypack.static.compile import LANGUAGE_GLOBS

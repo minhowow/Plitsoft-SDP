@@ -88,6 +88,39 @@ def engine_skips(path: Path) -> bool:
     return known and suffix not in ENGINE_EXTS
 
 
+def not_utf8(path: Path) -> bool:
+    """UTF-8 로 읽히지 않는 파일인가(EUC-KR·CP949, 주석 속 Latin-1 한 바이트 등).
+
+    Semgrep 1.176.1 의 정규식 조건은 이런 파일에서 오류 없이 아무것도 찾지 않는다(실측). 적용 조건이 정규식이면
+    규칙이 꺼져 파일이 '문제 없음'이 된다. 검사한 것으로 세지 않고 건너뛴 파일로 알린다."""
+    try:
+        path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+#: 건너뛴 까닭(admit 의 판정) → 사람에게 보일 이름. 안내·보고서가 모두 이것을 쓴다. 따로 적으면 새 까닭이 빠진다
+#: (실측: UTF-8 까닭을 더할 때 글·SARIF 보고서가 옛 목록을 그대로 적었다).
+SKIP_LABELS = {
+    "big": "1MB 초과",
+    "gen": "축소·번들 파일",
+    "unreadable": "읽을 수 없는 파일",
+    "engine": "엔진이 읽지 못하는 확장자(.mts·.cts·대문자 등)",
+    "encoding": "UTF-8 이 아닌 파일",
+    "dir": "생성물 디렉터리",
+    "link": "심볼릭 링크",
+}
+
+LISTED = ("big", "gen", "unreadable", "engine", "encoding")
+"""건너뛴 파일을 이름까지 적는 까닭. 생성물 디렉터리와 심볼릭 링크는 적지 않는다(링크는 개수만 센다)."""
+
+SKIPPED_REASONS = " · ".join(SKIP_LABELS[k] for k in LISTED)
+"""보고서가 건너뛴 파일 옆에 적는 까닭 목록."""
+
+
 @dataclass
 class Discovery:
     files: list[Path] = field(default_factory=list)
@@ -97,19 +130,38 @@ class Discovery:
     """읽을 권한이 없는 파일. semgrep 은 이런 대상이 하나라도 있으면 출력 없이 끝나 검사 전체가 실패한다(실측)."""
     skipped_engine: list[Path] = field(default_factory=list)
     """엔진이 언어로 알아보지 못하는 확장자의 파일(ENGINE_UNREADABLE)."""
+    skipped_encoding: list[Path] = field(default_factory=list)
+    """UTF-8 이 아닌 파일(not_utf8). 사용자 코드인데 보지 못했으므로 scan 은 '불확실'처럼 종료 코드에 센다."""
     skipped_links: int = 0
 
     def __len__(self) -> int:
         return len(self.files)
 
+    def _lists(self) -> dict[str, list[Path]]:
+        return {
+            "big": self.skipped_big,
+            "gen": self.skipped_generated,
+            "unreadable": self.skipped_unreadable,
+            "engine": self.skipped_engine,
+            "encoding": self.skipped_encoding,
+        }
+
+    def add(self, verdict: str, path: Path) -> None:
+        """admit 의 판정대로 건너뛴 파일을 적는다. 적지 않는 판정(ok·ext·dir·gone)은 버린다."""
+        if verdict == "link":
+            self.skipped_links += 1
+        elif verdict in LISTED:
+            self._lists()[verdict].append(path)
+
     def skipped_files(self) -> list[Path]:
         """보고서에 '검사하지 않음'으로 적을 파일. 같은 파일을 두 경로로 만났어도 한 번만 적고, 다른 경로로
         검사한 파일(이름을 대서 넣은 축소 파일 등)은 적지 않는다."""
         out, seen = [], {f.resolve() for f in self.files}
-        for p in self.skipped_big + self.skipped_generated + self.skipped_unreadable + self.skipped_engine:
-            if p.resolve() not in seen:
-                seen.add(p.resolve())
-                out.append(p)
+        for kind in LISTED:
+            for p in self._lists()[kind]:
+                if p.resolve() not in seen:
+                    seen.add(p.resolve())
+                    out.append(p)
         return out
 
 
@@ -124,7 +176,7 @@ def admit(path: Path, root: Path, exts: set[str]) -> str:
     """파일 하나를 검사 대상에 넣을지. 전체 검사와 --staged·--diff 가 같은 규칙을 쓴다.
 
     "ok" · "ext"(확장자가 안 맞음) · "dir"(생성물 디렉터리 아래) · "gen"(축소·번들 파일) ·
-    "link" · "big" · "unreadable" · "gone" · "engine"(엔진이 읽지 못하는 확장자).
+    "link" · "big" · "unreadable" · "gone" · "engine"(엔진이 읽지 못하는 확장자) · "encoding"(UTF-8 이 아님).
 
     확장자는 대소문자 없이 견줘 팩의 언어인지 보고(Mail.TS 도 TypeScript 파일이다), 엔진이 읽는지는
     대소문자를 가려 본다(ENGINE_EXTS). 팩의 언어인데 엔진이 읽지 못하면 "engine" 이다.
@@ -159,6 +211,20 @@ def admit(path: Path, root: Path, exts: set[str]) -> str:
         return "unreadable"
     if engine_skips(path):
         return "engine"
+    if not_utf8(path):
+        return "encoding"
+    return "ok"
+
+
+def admit_named(path: Path) -> str:
+    """이름을 대서 준 파일 하나. 확장자·생성물·크기는 묻지 않는다(사용자가 명시한 것을 거르지 않는다). 엔진이
+    제대로 읽지 못하는 파일만 뺀다: "engine" · "unreadable" · "encoding" · "ok"."""
+    if engine_skips(path):
+        return "engine"
+    if not os.access(path, os.R_OK):
+        return "unreadable"
+    if not_utf8(path):
+        return "encoding"
     return "ok"
 
 
@@ -186,8 +252,9 @@ def discover(paths: list[Path], languages: list[str], use_git: bool = True) -> D
     """검사 대상 파일 목록.
 
     파일을 직접 지정하면 확장자와 무관하게 받는다. 사용자가 명시한 것을 거르지 않는다.
-    다만 심볼릭 링크면 가리키는 파일을 검사하고, 아는 언어인데 엔진이 읽지 못하는 철자(engine_skips)면 검사하지
-    않은 파일로 알린다. 넘기면 엔진이 말없이 건너뛰어 '다 봤다'가 된다.
+    다만 심볼릭 링크면 가리키는 파일을 검사하고, 엔진이 제대로 읽지 못하는 파일(아는 언어인데 엔진이 읽지 않는
+    철자, 읽을 권한이 없음, UTF-8 이 아님)은 검사하지 않은 파일로 알린다. 넘기면 엔진이 말없이 건너뛰어 '다 봤다'가
+    되거나, 읽을 수 없는 파일 하나로 검사 전체가 실패한다.
     """
     exts = extensions_for(languages)
     found = Discovery()
@@ -199,11 +266,12 @@ def discover(paths: list[Path], languages: list[str], use_git: bool = True) -> D
         if p.is_file():
             if p.is_symlink():
                 p = p.resolve()
-            if engine_skips(p):
-                # 이름을 댔어도 엔진이 읽지 못한다. 검사한 것으로 세면 조용히 '거짓'이 된다
+            verdict = admit_named(p)
+            if verdict != "ok":
+                # 이름을 댔어도 엔진이 제대로 읽지 못한다. 검사한 것으로 세면 조용히 '거짓'이 된다
                 if p.resolve() not in skipped_seen:
                     skipped_seen.add(p.resolve())
-                    found.skipped_engine.append(p)
+                    found.add(verdict, p)
                 continue
             if p.resolve() not in seen:
                 seen.add(p.resolve())
@@ -218,21 +286,12 @@ def discover(paths: list[Path], languages: list[str], use_git: bool = True) -> D
 
         for child in candidates:
             verdict = admit(child, p, exts)
-            if verdict in ("big", "gen", "unreadable", "engine"):
+            if verdict in LISTED:
                 # 같은 파일을 두 경로(폴더와 그 안의 파일 등)로 만나도 건너뛴 목록에는 한 번만 넣는다
                 if child.resolve() in skipped_seen:
                     continue
                 skipped_seen.add(child.resolve())
-            if verdict == "link":
-                found.skipped_links += 1
-            elif verdict == "big":
-                found.skipped_big.append(child)
-            elif verdict == "gen":
-                found.skipped_generated.append(child)
-            elif verdict == "unreadable":
-                found.skipped_unreadable.append(child)
-            elif verdict == "engine":
-                found.skipped_engine.append(child)
+            found.add(verdict, child)
             if verdict != "ok" or child.resolve() in seen:
                 continue
             seen.add(child.resolve())

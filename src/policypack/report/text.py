@@ -16,6 +16,7 @@ import os
 import sys
 from pathlib import Path
 
+from policypack.discover import SKIPPED_REASONS
 from policypack.evaluate.engine import EvalResult
 from policypack.report.outcome import Finding, Outcome
 from policypack.report.paths import rel
@@ -215,9 +216,6 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style) -> str:
     if result.skipped:
         names = ", ".join(Path(p).name for p in result.skipped[:3])
         more = f" 외 {len(result.skipped) - 3}개" if len(result.skipped) > 3 else ""
-        gaps.append(
-            f"  건너뛴 파일 {len(result.skipped)}개({names}{more}) — "
-            "1MB 초과·축소 번들·읽을 수 없는 파일·엔진이 읽지 못하는 확장자"
-        )
+        gaps.append(f"  건너뛴 파일 {len(result.skipped)}개({names}{more}) — {SKIPPED_REASONS}")
     note = st.dim("  이 도구는 법률 자문이 아닙니다. 검토가 필요한 지점을 고를 뿐입니다.")
     return "\n".join([body, *[st.soft(g) for g in gaps], note])

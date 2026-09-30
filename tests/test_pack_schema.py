@@ -281,6 +281,45 @@ def test_validate_reports_an_amended_statute(tmp_path, capsys):
     assert main(["validate", str(copy), "--strict"]) == 1
 
 
+@pytest.mark.parametrize(
+    "broken",
+    [
+        {"pattern-regex: foo": 'pattern-regex: "(foo"'},  # 괄호가 빠진 정규식
+        {"{pattern-regex: bar}": '{pattern: "bar(("}'},  # 구문 오류 패턴
+        {"pack: {id: t, title: 시험}": "pack: {id: t, title: 시험}\ndefaults: {languages: [javscript]}"},  # 없는 언어
+    ],
+)
+def test_validate_runs_the_static_conditions_through_the_engine(tmp_path, capsys, broken):
+    """문법 검사(pydantic)는 패턴·정규식·언어 이름을 읽지 않는다. 그래서 validate 가 '문법에 맞습니다'라고 한 팩을
+    scan 이 거절했다(끝까지 점검에서 실측). 규칙 오류는 엔진의 임시 경로가 아니라 팩의 이름으로 적는다."""
+    from policypack.cli import main
+
+    text = MINIMAL
+    for old, new in broken.items():
+        assert old in text
+        text = text.replace(old, new, 1)
+    _write(tmp_path, text)
+    assert main(["validate", str(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert "정적 조건이 잘못됐습니다" in err
+    if " in rule " in err:
+        # semgrep 은 id 앞에 임시 폴더 경로를 점으로 붙인다(macOS var.folders…, 리눅스 tmp.…). 팩의 이름만 남긴다
+        assert " in rule p1.r1." in err
+
+
+def test_validate_warns_about_languages_a_folder_scan_never_selects(tmp_path, capsys):
+    """Semgrep 이 아는 언어여도(rust) 폴더 검사는 그 파일을 고르지 않는다. 팩이 조용히 아무것도 검사하지 않았다."""
+    from policypack.cli import main
+
+    _write(
+        tmp_path,
+        MINIMAL.replace("pack: {id: t, title: 시험}", "pack: {id: t, title: 시험}\ndefaults: {languages: [rust]}"),
+    )
+    assert main(["validate", str(tmp_path)]) == 0
+    assert "rust 파일은 폴더 검사에서 고르지 않습니다" in capsys.readouterr().out
+    assert main(["validate", str(tmp_path), "--strict"]) == 1
+
+
 def test_committed_schemas_match_the_model_and_nothing_else_is_there():
     """커밋한 schemas/ 가 모델과 같고, 지운 문법의 스키마 파일이 남아 있지 않다."""
     from policypack.cli import SCHEMAS, main

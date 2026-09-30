@@ -22,14 +22,16 @@ from pathlib import Path
 from policypack import __version__
 from policypack.defaults import default_pack
 from policypack.discover import Discovery
-from policypack.errors import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, ConfigError, PackError, PolicypackError
+from policypack.errors import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, ConfigError, PolicypackError
 from policypack.pack.loader import (
     check_legal_texts,
     check_review_dates,
     find_anchor_without_regions,
     find_unconfirmable_weak,
+    find_unselected_languages,
     load_pack,
     pack_digest,
+    pack_location,
 )
 
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"
@@ -101,10 +103,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_validate(args) -> int:
-    base = Path(args.pack) if args.pack else default_pack()
-    pack = load_pack(base)
-    if base.is_file():
-        base = base.parent
+    pack_file, base = pack_location(args.pack or default_pack())
+    pack = load_pack(pack_file)
+    _check_static(pack)
 
     n_rules = sum(1 for _ in pack.iter_rules())
     n_static = sum(
@@ -113,13 +114,14 @@ def cmd_validate(args) -> int:
     n_ai = sum(1 for _, r in pack.iter_rules() for p in r.compliant_if_any if p.is_ai) + sum(
         1 for _, r in pack.iter_rules() if r.applies_ai
     )
-    print(f"{pack.pack.title} ({pack.pack.id})  해시 {pack_digest(base)}")
+    print(f"{pack.pack.title} ({pack.pack.id})  해시 {pack_digest(pack_file)}")
     print(f"  정책 {len(pack.policies)} · 규칙 {n_rules} · 정적 조건 {n_static} · AI 질문 {n_ai}")
 
     groups = [
         ("조문 추적성", check_legal_texts(pack, base)),
         ("재검토 기한", check_review_dates(pack)),
         ("함수 단위로 판정할 수 없는 언어", find_anchor_without_regions(pack)),
+        ("폴더 검사가 고르지 않는 언어", find_unselected_languages(pack)),
         ("확인할 수 없는 약한 대안", find_unconfirmable_weak(pack)),
     ]
     total = 0
@@ -140,6 +142,24 @@ def cmd_validate(args) -> int:
         print("--strict 라서 실패로 처리합니다.")
         return EXIT_FINDINGS
     return EXIT_OK
+
+
+def _check_static(pack) -> None:
+    """Semgrep 이 팩의 정적 조건을 받는지 본다. 문법 검사(pydantic)는 패턴·정규식·언어 이름을 읽지 않는다.
+
+    Semgrep 은 설정을 읽을 때 모든 규칙의 오류를 낸다(대상의 언어와 무관, 1.176.1 실측). 빈 파일 하나를 대상으로 준다.
+    대상 없이 부르면 작업 폴더를 검사한다. 이게 없으면 Semgrep 이 거절할 팩에 '문법에 맞습니다'라고 답했다(실측:
+    괄호가 빠진 정규식·패턴, 없는 언어 이름).
+    """
+    import tempfile
+
+    from policypack.static.compile import compile_static
+    from policypack.static.semgrep_cli import SemgrepBackend
+
+    with tempfile.TemporaryDirectory(prefix="policypack-validate-") as d:
+        probe = Path(d) / "probe.txt"
+        probe.write_text("", encoding="utf-8")
+        SemgrepBackend().run(compile_static(pack), [probe]).check_rules()
 
 
 # ── schema ──────────────────────────────────────────────────────────────────
@@ -278,15 +298,9 @@ def _warn_engine_errors(engine: str, errors: list[str]) -> None:
 
 
 def _skip_note(counts: dict[str, int]) -> str:
-    labels = {
-        "big": "1MB 초과",
-        "dir": "생성물 디렉터리",
-        "gen": "축소·번들 파일",
-        "link": "심볼릭 링크",
-        "unreadable": "읽을 수 없는 파일",
-        "engine": "엔진이 읽지 못하는 확장자(.mts·.cts·대문자 등)",
-    }
-    parts = [f"{labels[k]} {n}개" for k, n in counts.items() if n and k in labels]
+    from policypack.discover import SKIP_LABELS
+
+    parts = [f"{SKIP_LABELS[k]} {n}개" for k, n in counts.items() if n and k in SKIP_LABELS]
     return f" ({' · '.join(parts)} 건너뜀)" if parts else ""
 
 
@@ -342,6 +356,13 @@ def _select_targets(args, languages: list[str]) -> Selection:
                 f"Semgrep 이 읽지 못하는 철자의 파일(.mts·.cts·대문자 확장자 등) {len(found.skipped_engine)}개는 "
                 f"검사하지 않았습니다({names})."
             )
+        if found.skipped_encoding:
+            names = ", ".join(str(p) for p in found.skipped_encoding[:3])
+            notes.append(
+                f"UTF-8 이 아닌 파일 {len(found.skipped_encoding)}개는 검사하지 않았습니다({names}). "
+                f"Semgrep 의 정규식 조건이 이런 파일에서 아무것도 찾지 못합니다. UTF-8 로 바꾸면 검사합니다. "
+                f"보지 못한 코드라 '불확실'처럼 종료 코드에 셉니다(--fail-on review 면 세지 않습니다)."
+            )
         return Selection(found=found, note="\n".join(notes))
 
     start = _scope_start(paths)
@@ -357,16 +378,8 @@ def _select_targets(args, languages: list[str]) -> Selection:
         counts[verdict] = counts.get(verdict, 0) + 1
         if verdict == "ok":
             found.files.append(f)
-        elif verdict == "big":
-            found.skipped_big.append(f)
-        elif verdict == "gen":
-            found.skipped_generated.append(f)
-        elif verdict == "unreadable":
-            found.skipped_unreadable.append(f)
-        elif verdict == "engine":
-            found.skipped_engine.append(f)
+        found.add(verdict, f)
     found.files.sort()
-    found.skipped_links = counts.get("link", 0)
 
     note = f"{scope.label} {len(found.files)}개를 검사합니다{_skip_note(counts)}."
     if scope.dirty:
@@ -389,15 +402,12 @@ def _scan_languages(pack) -> list[str]:
 def cmd_scan(args) -> int:
     from policypack.discover import language_of
     from policypack.evaluate.engine import EvalResult, Target, evaluate
-    from policypack.report.outcome import Outcome
     from policypack.static.compile import compile_static
     from policypack.static.semgrep_cli import SemgrepBackend
 
-    base = Path(args.config) if args.config else default_pack()
-    pack = load_pack(base)
-    if base.is_file():
-        base = base.parent
-    digest = pack_digest(base)
+    pack_file, base = pack_location(args.config or default_pack())
+    pack = load_pack(pack_file)
+    digest = pack_digest(pack_file)
 
     sel = _select_targets(args, _scan_languages(pack))
     found, root = sel.found, sel.root
@@ -429,26 +439,39 @@ def cmd_scan(args) -> int:
                 skipped=[str(p) for p in found.skipped_files()],
             )
             _emit(args, empty, pack, base, root, digest, n_files=0)
-        return EXIT_OK
+        return _exit_code(args, [], found)
 
     targets = [Target(path=f, lang=language_of(f)) for f in found.files]
     static = SemgrepBackend().run(compile_static(pack), [t.path for t in targets])
-    if static.rule_errors:
-        raise PackError("정책 팩의 정적 조건이 잘못됐습니다:\n  " + "\n  ".join(static.rule_errors))
+    static.check_rules()
     _warn_engine_errors(static.engine, static.unlocated_errors)
 
     # 판정자가 없거나 답하지 못하면 AI 에게 물어야 했던 곳을 보고서가 'AI 확인 필요'로 알린다(요약 줄·JSON·SARIF).
     result = evaluate(pack, targets, static, judge=judge)
     result.skipped = [str(p) for p in found.skipped_files()]
+    if getattr(judge, "skipped", 0):
+        print(
+            f"주의: 판정자가 연달아 {judge.GIVE_UP_AFTER}번 시간 안에 답하지 않아 남은 질문 {judge.skipped}개는 "
+            f"묻지 않았습니다. 그 판정은 'AI 확인 필요'로 남습니다.",
+            file=sys.stderr,
+        )
 
     _emit(args, result, pack, base, root, digest, n_files=len(found))
+    return _exit_code(args, result.findings, found)
+
+
+def _exit_code(args, findings, found: Discovery) -> int:
+    """`--fail-on` 에 따른 종료 코드. UTF-8 이 아니어서 건너뛴 파일은 '불확실'처럼 센다. 사용자 코드인데 보지
+    못했다. 건너뛰기만 하고 0으로 끝내면, 전에 1이던 위반이 인코딩 하나로 통과한다(검토에서 실측). 1MB 초과·번들
+    파일은 생성물로 보고 세지 않는다."""
+    from policypack.report.outcome import Outcome
 
     if args.exit_zero or args.fail_on == "never":
         return EXIT_OK
     if args.fail_on == "review":
-        hit = any(f.outcome is Outcome.NEEDS_REVIEW for f in result.findings)
+        hit = any(f.outcome is Outcome.NEEDS_REVIEW for f in findings)
     else:
-        hit = any(f.outcome.is_finding for f in result.findings)
+        hit = bool(found.skipped_encoding) or any(f.outcome.is_finding for f in findings)
     return EXIT_FINDINGS if hit else EXIT_OK
 
 
@@ -487,18 +510,19 @@ def cmd_test(args) -> int:
     if len(packs) > 1:
         raise ConfigError(f"한 번에 팩 하나만 시험합니다: {', '.join(map(str, packs))}")
     if args.config:
-        base = Path(args.config)
-        if base.is_file():
-            base = base.parent
+        pack_file, base = pack_location(args.config)
         if packs and base.resolve() != packs[0]:
             raise ConfigError(f"--config({base}) 와 경로의 팩({packs[0]})이 다릅니다")
     else:
-        base = packs[0] if packs else default_pack()
-    pack = load_pack(base)
+        pack_file, base = pack_location(packs[0] if packs else default_pack())
+    pack = load_pack(pack_file)
 
-    fixtures = packtest.collect(paths or [base], pack)
+    # 팩 폴더(또는 경로 없음)는 그 팩의 tests/ 다. 폴더를 통째로 훑으면 팩 파일 이름이 pack.yaml 이 아닐 때 옆에 둔
+    # 다른 팩의 테스트까지 모았다(검토에서 실측)
+    roots = [base / "tests" if p.resolve() == base.resolve() else p for p in paths] or [base / "tests"]
+    fixtures = packtest.collect(roots, pack)
     if not fixtures:
-        raise ConfigError(f"픽스처가 없습니다: {', '.join(map(str, paths or [base / 'tests']))}")
+        raise ConfigError(f"픽스처가 없습니다: {', '.join(map(str, roots))}")
 
     # 커버리지를 셀 범위. 팩 전체(경로 없음·팩 디렉터리·tests 뿌리)면 모든 규칙, 테스트 파일 몇 개면
     # 그 파일들이 기대를 적은 규칙만. 다른 정책의 빈틈으로 --strict 가 실패하면 안 된다
@@ -509,10 +533,10 @@ def cmd_test(args) -> int:
     _warn_engine_errors(run.engine, run.engine_errors)
     root = Path.cwd()
     if args.output_format == "json":
-        print(testrun.dumps(run, root, pack.pack.id, pack_digest(base)))
+        print(testrun.dumps(run, root, pack.pack.id, pack_digest(pack_file)))
     else:
         color = False if args.no_color else None
-        print(testrun.render(run, root, explain=args.explain, color=color, pack_path=base))
+        print(testrun.render(run, root, explain=args.explain, color=color, pack_path=pack_file))
 
     if args.exit_zero:
         return EXIT_OK

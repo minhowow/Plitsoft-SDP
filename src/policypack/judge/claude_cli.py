@@ -89,6 +89,16 @@ def available() -> bool:
     return shutil.which(BIN) is not None
 
 
+def _remove(folder: str) -> bool:
+    """중립 폴더를 지운다. 판정자가 그 안에 무엇을 남겼으면 True 다."""
+    try:
+        wrote = bool(os.listdir(folder))
+    except OSError:
+        wrote = True  # 폴더를 지우거나 바꿔 놓았다
+    shutil.rmtree(folder, ignore_errors=True)
+    return wrote
+
+
 class ClaudeCliJudge:
     """구독으로 도는 판정자. 호출마다 사용자의 구독 사용량을 쓴다."""
 
@@ -123,6 +133,7 @@ class ClaudeCliJudge:
                     input=q.prompt(),
                     capture_output=True,
                     encoding="utf-8",  # 질문에 한글이 있다. 로캘 인코딩(CP949 등)으로 쓰면 깨진다
+                    errors="replace",  # 깨진 출력은 아래에서 파싱 실패가 된다. 예외로 검사 전체를 멈추지 않는다
                     timeout=self.timeout,
                     cwd=neutral,
                     env=env,
@@ -133,16 +144,22 @@ class ClaudeCliJudge:
                 # 실행 파일이 없거나 실행할 수 없다. 판정자를 부르지 못한 것이지 도구 오류가 아니다
                 return self._fail("transport")
             finally:
-                os.rmdir(neutral)
+                wrote = _remove(neutral)
+            if wrote:
+                # 작업 폴더에 무엇을 남겼다. 프롬프트에 답만 한 것이 아니다
+                return self._fail("isolation")
             if proc.returncode == 0:
                 break
             if attempt >= self.retries:
                 return self._fail("transport")
             time.sleep(2)
 
+        # 판정자의 출력 모양은 우리가 정하지 못한다. 예상과 다르면 예외가 아니라 파싱 실패다
         try:
             d = json.loads(proc.stdout)
         except json.JSONDecodeError:
+            return self._fail("parse")
+        if not isinstance(d, dict):
             return self._fail("parse")
 
         if d.get("is_error"):
@@ -152,7 +169,10 @@ class ClaudeCliJudge:
         if d.get("num_turns") != 1 or d.get("permission_denials"):
             return self._fail("isolation")
 
-        raw, evidence, parse_failed = parse_answer(d.get("result", ""))
+        result = d.get("result")
+        if result is not None and not isinstance(result, str):
+            return self._fail("parse")
+        raw, evidence, parse_failed = parse_answer(result or "")
         return Answer(raw=raw, evidence=evidence, failure="parse" if parse_failed else None)
 
     def _fail(self, kind: Failure) -> Answer:

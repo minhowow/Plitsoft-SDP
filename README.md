@@ -44,7 +44,8 @@ compliant-if-any:            # 적법한 대안. 하나라도 참이면 준수
   경고가 남는다.
 - **AI 차례를 숨기지 않는다.** 판정자가 없거나(`--judge none`, 기본) 답하지 못하면, AI 에게 물었어야 할
   곳을 'AI 확인 필요'로 보고한다. 그 AI 대안은 판정에 넣지 않으므로 정적 판정이 그대로 남는다. 판정자가
-  없을 때와 고장 났을 때 판정이 같다.
+  없을 때와 고장 났을 때 판정이 같다. 판정자가 연달아 세 번 시간 안에 답하지 않으면 그 실행에서는 더 묻지
+  않는다.
 - **AI 가 푼 것을 남긴다.** AI 의 '예'로 풀린 경고(인용한 줄과 관문 결과)와 적용 질문의 '아니오'로 빠진
   판정을 글·JSON·SARIF 에 싣는다. 관문은 인용이 코드에 있는지만 보고 규칙과 관련 있는지는 보지 않으므로,
   사람이 검토할 수 있어야 한다.
@@ -111,10 +112,15 @@ uv run policypack scan src/ --output-format sarif # 근거 조문이 help.markdo
 uv run policypack scan --staged                    # 스테이징된 파일만 (커밋 전 훅)
 uv run policypack scan --diff origin/main          # 분기점 이후 이 브랜치가 바꾼 파일만 (CI)
 uv run policypack scan src/ --judge claude-cli:haiku  # 정적으로 결론이 안 난 곳만 AI 에게 묻는다
-uv run policypack validate                        # 팩 문법·조문 원문 해시·재검토 기한
+uv run policypack validate                        # 팩 문법·Semgrep 조건·조문 원문 해시·재검토 기한
 uv run policypack test --strict                   # 팩의 픽스처 (모델 호출 0회)
 uv run policypack doctor                          # 정적 백엔드 진단
 ```
+
+1MB 초과·축소 번들·읽을 수 없는 파일·엔진이 읽지 못하는 확장자·UTF-8 이 아닌 파일은 검사하지 않은 파일로
+보고서에 적는다. 생성물 디렉터리(node_modules·dist 등) 아래 파일은 전체 검사에서 적지 않고 뺀다(`--staged`·`--diff`
+는 개수를 알린다). UTF-8 이 아닌 파일(EUC-KR 등)은 Semgrep 의 정규식 조건이 오류 없이 아무것도 찾지 못해서 뺀다.
+보지 못한 사용자 코드라 '불확실'처럼 종료 코드에 센다. UTF-8 로 바꾸면 검사한다.
 
 종료 코드는 `0` 검토할 것 없음 · `1` 검토 필요 · `2` 도구 오류다. CI에서
 전자는 사람이 볼 일이고 후자는 파이프라인이 멈출 일이다. `--fail-on review` 면 확실한 '검토 필요'만,

@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -97,6 +98,12 @@ def canonical_rule_id(rule_id: str, known) -> str | None:
         if (rule_id == cid or rule_id.endswith("." + cid)) and (best is None or len(cid) > len(best)):
             best = cid
     return best
+
+
+def _canonical_ids_in(text: str, known) -> str:
+    """문구 속 규칙 id 에서 엔진이 붙인 경로 접두사를 뗀다(`var.folders.….T.acme.p.r.c` → `acme.p.r.c`).
+    규칙 오류를 읽는 사람은 임시 폴더 경로가 아니라 자기 팩의 정책·규칙·조건 이름을 봐야 한다."""
+    return re.sub(r"[\w.\-]+", lambda m: canonical_rule_id(m.group(0), known) or m.group(0), text)
 
 
 def _is_region_rule(rule_id: str) -> bool:
@@ -212,6 +219,8 @@ def parse_semgrep_json(data: dict[str, Any], table: dict[str, RuleInfo] | None =
             continue
 
         msg = (err.get("long_msg") or err.get("message") or "").strip()
+        if table is not None:
+            msg = _canonical_ids_in(msg, table)
         result.rule_errors.append(f"[{label}] {msg[:400]}")
 
     for path, rules in result.rule_timeouts.items():

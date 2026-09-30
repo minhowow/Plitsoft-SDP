@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Protocol
 
+from policypack.errors import PackError
+
 
 @dataclass(frozen=True)
 class Pos:
@@ -153,6 +155,11 @@ class StaticResult:
                 setattr(self, f.name, mine + theirs)
             else:
                 raise TypeError(f"StaticResult.{f.name} 을 합치는 법을 모른다")
+
+    def check_rules(self) -> None:
+        """엔진이 팩의 규칙을 받지 않았으면 멈춘다. 사용자 코드가 아니라 팩의 문제다."""
+        if self.rule_errors:
+            raise PackError("정책 팩의 정적 조건이 잘못됐습니다:\n  " + "\n  ".join(self.rule_errors))
 
     @property
     def engine(self) -> str:

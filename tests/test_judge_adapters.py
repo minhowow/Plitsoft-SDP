@@ -131,6 +131,44 @@ def test_failure_is_never_raised_as_an_exception(monkeypatch):
     assert a.raw == "?"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        ["not", "an", "object"],
+        "just a string",
+        {**GOOD, "result": {"answer": "예"}},
+        {**GOOD, "result": 42},
+    ],
+)
+def test_an_unexpected_output_shape_is_a_parse_failure(monkeypatch, payload):
+    """판정자 출력의 모양은 우리가 정하지 못한다. 배열·문자열 JSON 이나 문자열이 아닌 result 가 예외로 검사 전체를
+    멈추고 정적 결과까지 버렸다(실측)."""
+    monkeypatch.setattr(subprocess, "run", _fake_run(json.dumps(payload)))
+    assert ClaudeCliJudge("haiku").ask(Q).failure == "parse"
+
+
+def test_a_judge_that_writes_into_its_folder_is_discarded(monkeypatch):
+    """중립 폴더에 무엇을 남겼으면 답만 한 것이 아니다. 전에는 폴더를 지우다 예외가 났고 임시 폴더가 남았다."""
+    seen = {}
+
+    def run(cmd, **kw):
+        seen["cwd"] = Path(kw["cwd"])
+        (seen["cwd"] / "leftover.txt").write_text("x", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(GOOD), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert ClaudeCliJudge("haiku").ask(Q).failure == "isolation"
+    assert not seen["cwd"].exists()
+
+
+def test_undecodable_output_is_a_parse_failure(tmp_path, monkeypatch):
+    fake = tmp_path / "claude"
+    fake.write_text(f"#!{sys.executable}\nimport sys\nsys.stdin.read()\nsys.stdout.buffer.write(b'\\xff\\xfe{{')\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(claude_cli, "BIN", str(fake))
+    assert ClaudeCliJudge("haiku").ask(Q).failure == "parse"
+
+
 def test_neutral_working_directory(monkeypatch):
     """폴더 이름으로도 프로젝트를 추론하지 못하게 빈 임시 폴더에서 돈다."""
     seen = {}
@@ -190,7 +228,28 @@ def test_the_first_answer_wins_over_later_ones():
     assert parse_answer(raw) == ("아니오", "", False)
 
 
-@pytest.mark.parametrize("word,expected", [("yes", "예"), ("No", "아니오"), ("해당없음", "해당없음"), ("maybe", "?")])
+@pytest.mark.parametrize(
+    "word,expected",
+    [
+        ("yes", "예"),
+        ("Yes.", "예"),
+        ("네", "예"),
+        ("No", "아니오"),
+        ("아니요", "아니오"),
+        ("해당없음", "해당없음"),
+        ("해당 없음", "해당없음"),
+        ("N/A", "해당없음"),
+        ("maybe", "?"),
+        # 앞 글자로 고르면 아래가 '아니오'·'예'가 되어, 인용 없는 '아니오'가 적용 질문에서 규칙을 뺐다(실측)
+        ("not sure", "?"),
+        ("none", "?"),
+        ("no idea", "?"),
+        ("nope, cannot tell", "?"),
+        ("아니라고 단정하기 어려움", "?"),
+        ("yesterday", "?"),
+        ("예외 없음", "?"),
+    ],
+)
 def test_answer_normalization(word, expected):
     assert parse_answer(json.dumps({"answer": word}))[0] == expected
 
@@ -204,8 +263,9 @@ def test_build_dispatch():
     assert isinstance(build("claude-cli:sonnet").inner, ClaudeCliJudge)
     assert build("claude-cli:sonnet").id == "claude-cli:sonnet"
     assert isinstance(build("anthropic:haiku").inner, AnthropicApiJudge)
-    with pytest.raises(ValueError):
-        build("openai:gpt")
+    for bad in ("openai:gpt", "claude-cli:", "anthropic:"):
+        with pytest.raises(ValueError):
+            build(bad)
 
 
 def test_api_judge_without_a_key_fails_softly(monkeypatch):
@@ -275,3 +335,48 @@ def test_a_run_never_asks_the_same_question_twice(tmp_path, monkeypatch, capsys)
     doc = json.loads(capsys.readouterr().out)
     assert code == 1 and len(doc["findings"]) == 2
     assert log.read_text().count("x") == 1, "같은 (질문, 코드)를 두 번 물었다"
+
+
+class _Flaky:
+    """정해 둔 실패를 차례로 내는 판정자. 불린 횟수를 센다."""
+
+    id = "flaky"
+
+    def __init__(self, failures):
+        self.failures, self.calls = list(failures), 0
+
+    def ask(self, q):
+        from policypack.judge.base import Answer
+
+        self.calls += 1
+        kind = self.failures.pop(0) if self.failures else None
+        return Answer(raw="?" if kind else "아니오", failure=kind)
+
+
+def _questions(n):
+    return [Question(text=f"질문 {i}", code="x = 1;", lang="typescript") for i in range(n)]
+
+
+def test_a_judge_that_keeps_timing_out_is_given_up_on():
+    """멈춘 판정자는 질문마다 시간 제한(180초)을 다 쓰고 질문은 하나씩 간다. 245개면 약 12시간이었다(실측).
+    연달아 세 번 시간 안에 답하지 않으면 그 실행에서는 더 부르지 않는다. 묻지 않은 질문은 부르지 못한 것으로 남고
+    그 수를 센다."""
+    from policypack.judge.base import OncePerRun
+
+    inner = _Flaky(["timeout"] * 10)
+    judge = OncePerRun(inner)
+    answers = [judge.ask(q) for q in _questions(6)]
+    assert inner.calls == OncePerRun.GIVE_UP_AFTER and judge.skipped == 3
+    assert [a.failure for a in answers] == ["timeout"] * 3 + ["transport"] * 3
+
+
+def test_request_rejections_do_not_switch_the_judge_off():
+    """연결 실패·거절은 그 질문만의 문제일 수 있다(너무 긴 프롬프트 등). 세면 큰 파일 셋이 이어질 때 나머지 질문을
+    모두 버렸다(검토에서 실측). 띄엄띄엄 난 시간 초과도 포기하지 않는다."""
+    from policypack.judge.base import OncePerRun
+
+    inner = _Flaky(["transport"] * 5 + ["timeout", "timeout", None, "timeout", "timeout"])
+    judge = OncePerRun(inner)
+    for q in _questions(10):
+        judge.ask(q)
+    assert inner.calls == 10 and judge.skipped == 0

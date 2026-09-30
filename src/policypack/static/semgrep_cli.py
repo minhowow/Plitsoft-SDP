@@ -184,6 +184,7 @@ def version_of(path: Path) -> str:
     try:
         out = subprocess.run(
             [str(path), "--version", "--disable-version-check"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             encoding="utf-8",
             errors="replace",
@@ -336,12 +337,22 @@ class SemgrepBackend:
             "--timeout-threshold",
             self.TIMEOUT_THRESHOLD,
             "--quiet",
+            # 여기부터는 대상이다. 없으면 '-' 로 시작하는 파일 이름이 옵션이 된다(실측: `--json-output=index.ts`
+            # 라는 파일이 있으면 semgrep 이 index.ts 를 결과 JSON 으로 덮어썼고, `-x.ts` 하나로 검사 전체가 실패했다)
+            "--",
             *[str(t) for t in targets],
         ]
         t0 = time.time()
         try:
+            # 대상 이름이 정확히 '-' 면 `--` 뒤여도 semgrep 은 표준 입력을 읽는다. 터미널을 기다리며 멈추지 않게 막는다
             proc = subprocess.run(
-                cmd, capture_output=True, encoding="utf-8", errors="replace", env=_env(self.path), timeout=self.timeout
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                env=_env(self.path),
+                timeout=self.timeout,
             )
         except subprocess.TimeoutExpired as e:
             # 시간 제한이 없으면 커밋 전 훅과 CI 가 영원히 멈춘다

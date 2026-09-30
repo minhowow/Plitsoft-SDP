@@ -89,6 +89,8 @@ def build(spec: str) -> OncePerRun:
         kind, model = spec.split(":", 1)
     else:
         kind, model = spec, "haiku"
+    if not model:
+        raise ValueError(f"모델 이름이 없습니다: {spec}")
     if kind == "claude-cli":
         return OncePerRun(ClaudeCliJudge(model=model))
     if kind == "anthropic":

@@ -37,7 +37,7 @@ from pathlib import Path
 from pydantic import Field, ValidationError, field_validator, model_validator
 from ruamel.yaml import YAML, YAMLError
 
-from policypack.discover import engine_skips, language_of
+from policypack.discover import engine_skips, language_of, not_utf8
 from policypack.errors import ConfigError, PackError
 from policypack.evaluate.engine import EvalResult, Target, Unit, evaluate, static_value
 from policypack.evaluate.kleene import FALSE, TRUE, or3
@@ -196,6 +196,9 @@ def load_test_file(p: Path, pack: PolicyPack, root: Path) -> list[Fixture]:
             # 엔진이 읽지 못하는 파일(.mts·대문자 확장자 등)은 구문 조건이 조용히 '거짓'이 된다.
             # 그런 픽스처의 기대가 맞아도 규칙에 대해 보여 주는 것이 없다
             raise PackError(f"{p}: {c.file}: 엔진이 읽지 못하는 확장자라 픽스처로 쓸 수 없습니다")
+        if not_utf8(path):
+            # 정규식 조건이 이 파일에서 아무것도 찾지 않는다. 같은 까닭이다
+            raise PackError(f"{p}: {c.file}: UTF-8 이 아니라 픽스처로 쓸 수 없습니다")
         if isinstance(c.expect, dict):
             expects = {k: v.value for k, v in c.expect.items()}
         else:
@@ -261,19 +264,19 @@ def _decoy(p: Path, file: str, name: str, expects: dict[str, str], rules: dict) 
 
 
 def collect(paths: list[Path], pack: PolicyPack) -> list[Fixture]:
-    """경로마다 픽스처를 모은다. 팩 디렉터리면 그 아래 tests/ 를 본다."""
+    """경로마다 픽스처를 모은다. 폴더면 그 아래 *.test.yaml 전부다. 팩 폴더를 그 팩의 tests/ 로 바꾸는 것은 부르는
+    쪽(cmd_test)이 한다. 여기서 pack.yaml 이 있는지로 짐작하면 이름이 다른 팩 파일일 때 틀린다."""
     out: list[Fixture] = []
     for given in paths:
-        base = given / "tests" if (given / "pack.yaml").is_file() else given
-        if base.is_dir():
-            stray = sorted(str(q) for q in base.rglob("*.test.yml"))
+        if given.is_dir():
+            stray = sorted(str(q) for q in given.rglob("*.test.yml"))
             if stray:
                 raise ConfigError(f"읽지 않는 확장자입니다: {', '.join(stray)} — .test.yaml 로 바꾸세요")
-            for f in sorted(base.rglob("*.test.yaml")):
-                out.extend(load_test_file(f, pack, base))
-        elif base.name.endswith(".test.yaml"):
-            out.extend(load_test_file(base, pack, base.parent))
-        elif base.name.endswith(".test.yml"):
+            for f in sorted(given.rglob("*.test.yaml")):
+                out.extend(load_test_file(f, pack, given))
+        elif given.name.endswith(".test.yaml"):
+            out.extend(load_test_file(given, pack, given.parent))
+        elif given.name.endswith(".test.yml"):
             raise ConfigError(f"읽지 않는 확장자입니다: {given} — .test.yaml 로 바꾸세요")
         else:
             raise ConfigError(f"테스트 파일(*.test.yaml)도 디렉터리도 아닙니다: {given}")
@@ -395,8 +398,7 @@ def run(pack: PolicyPack, fixtures: list[Fixture], backend, coverage_scope: set[
     t0 = time.time()
     static = backend.run(compile_static(pack), sorted({f.path for f in fixtures}))
     static_s = time.time() - t0
-    if static.rule_errors:
-        raise PackError("정책 팩의 정적 조건이 잘못됐습니다:\n  " + "\n  ".join(static.rule_errors))
+    static.check_rules()
 
     judge = StubJudge(fixtures)
     targets = [Target(path=f.path, lang=f.lang, case=f.id) for f in fixtures]

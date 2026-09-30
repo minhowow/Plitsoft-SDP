@@ -100,19 +100,35 @@ class OncePerRun:
     나온다(kr.network-act.50-4 의 다섯 규칙 가운데 문자 규칙 둘, 이메일 규칙 셋이 각각 같은 적용 질문을 쓴다). 실패한 답도 다시 묻지 않는다 — 한 실행
     안에서 같은 질문의 답이 갈리면 판정이 흔들린다. 실행이 끝나면 버린다(저장하지 않는다).
 
+    판정자가 연달아 GIVE_UP_AFTER 번 시간 안에 답하지 않으면 이 실행에서는 더 부르지 않는다. 멈춘 판정자는 질문마다
+    시간 제한을 다 쓰고(claude-cli 180초) 질문은 하나씩 간다. 질문이 수백 개면 몇 시간이다(실측: 245개 ≈ 12시간).
+    연결 실패는 세지 않는다. 너무 긴 프롬프트처럼 그 질문만 거절된 것일 수 있다(검토에서 실측: 큰 파일 셋이 이어지자
+    나머지 질문을 버렸다). 묻지 않은 질문은 부르지 못한 것(transport)으로 답해 'AI 확인 필요'로 남고 `skipped` 에 센다.
+
     정책 테스트의 스텁 판정자는 감싸지 않는다. 스텁은 (픽스처, 정책, 규칙, 조건)마다 답이 따로다.
     """
+
+    GIVE_UP_AFTER = 3
 
     def __init__(self, inner: Judge) -> None:
         self.inner = inner
         self.id = inner.id
         self._answers: dict[str, Answer] = {}
+        self._timeouts = 0
+        self.skipped = 0
 
     def ask(self, q: Question) -> Answer:
         key = hashlib.sha256(q.prompt().encode("utf-8")).hexdigest()
-        if key not in self._answers:
-            self._answers[key] = self.inner.ask(q)
-        return self._answers[key]
+        if key in self._answers:
+            return self._answers[key]
+        if self._timeouts >= self.GIVE_UP_AFTER:
+            self.skipped += 1
+            a = Answer(raw="?", failure="transport")
+        else:
+            a = self.inner.ask(q)
+            self._timeouts = self._timeouts + 1 if a.failure == "timeout" else 0
+        self._answers[key] = a
+        return a
 
 
 # ── 응답 해석 ───────────────────────────────────────────────────────────────
@@ -181,16 +197,29 @@ def _load(text: str):
         return None
 
 
+#: 받는 답. 앞 글자로 고르지 않는다 — 'not sure'·'none'·'no idea'·'아니라고 단정하기 어려움' 이 '아니오'가 되어
+#: 인용도 없이 규칙을 뺐다(실측). 여기 없는 답은 파싱 실패다.
+ANSWERS: dict[str, RawAnswer] = {
+    "예": "예",
+    "네": "예",
+    "yes": "예",
+    "y": "예",
+    "아니오": "아니오",
+    "아니요": "아니오",
+    "no": "아니오",
+    "n": "아니오",
+    "해당없음": "해당없음",
+    "해당 없음": "해당없음",
+    "n/a": "해당없음",
+    "not applicable": "해당없음",
+}
+
+
 def _normalize(d) -> tuple[RawAnswer, str, bool] | None:
     if not isinstance(d, dict):
         return None
-    ans = str(d.get("answer", "")).strip().lower()
-    if ans.startswith(("해당", "n/a")):
-        norm: RawAnswer = "해당없음"
-    elif ans.startswith(("예", "yes")):
-        norm = "예"
-    elif ans.startswith(("아니", "no")):
-        norm = "아니오"
-    else:
+    ans = re.sub(r"[\s.!。]+$", "", str(d.get("answer", "")).strip().lower())
+    norm = ANSWERS.get(ans)
+    if norm is None:
         return None
     return norm, str(d.get("evidence") or ""), False

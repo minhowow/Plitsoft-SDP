@@ -285,6 +285,59 @@ def test_scan_works_from_another_directory(tmp_path, monkeypatch, capsys):
     assert "만 14세" in out.out
 
 
+def test_file_names_that_look_like_options_stay_files(tmp_path, monkeypatch, capsys):
+    """semgrep 에 대상을 `--` 없이 넘겨 '-' 로 시작하는 이름이 옵션이 됐다. `--json-output=index.ts` 라는 파일이
+    있으면 index.ts 를 결과 JSON 으로 덮어썼고, `-signup.ts` 하나로 검사 전체가 실패했다(실측)."""
+    (tmp_path / "index.ts").write_text("export const keep = 1;\n", encoding="utf-8")
+    (tmp_path / "--json-output=index.ts").write_text("export {};\n", encoding="utf-8")
+    (tmp_path / "-signup.ts").write_text((REPO / VIOLATING).read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert run("--output-format", "concise", "--no-color") == 1
+    assert (tmp_path / "index.ts").read_text(encoding="utf-8") == "export const keep = 1;\n"
+    assert "-signup.ts" in capsys.readouterr().out
+
+
+def test_a_pack_file_with_another_name_is_the_pack_that_runs(tmp_path, capsys):
+    """--config 에 pack.yaml 이 아닌 이름의 팩 파일을 주면 옆의 pack.yaml 을 읽었다. test 는 경고 없이 다른 팩을
+    시험했고, validate·scan 은 다른 파일의 해시를 적었다(실측)."""
+    import hashlib
+    import shutil
+
+    pack = tmp_path / "pack"
+    shutil.copytree(REPO / "policies/kr-core", pack)
+    alt = pack / "alt.yaml"
+    alt.write_text((pack / "pack.yaml").read_text(encoding="utf-8").replace("  id: kr-core", "  id: alt-pack", 1))
+    digest = hashlib.sha256(alt.read_bytes()).hexdigest()[:16]
+
+    assert main(["validate", str(alt)]) == 0
+    assert f"(alt-pack)  해시 {digest}" in capsys.readouterr().out
+    assert run(VIOLATING, "--config", str(alt), "--output-format", "json") == 1
+    assert json.loads(capsys.readouterr().out)["run"]["pack_digest"] == digest
+    suite = pack / "tests" / "pipa-22-2.test.yaml"
+    assert main(["test", str(suite), "--config", str(alt), "--output-format", "json"]) == 0
+    doc = json.loads(capsys.readouterr().out)["run"]
+    assert (doc["pack"], doc["pack_digest"]) == ("alt-pack", digest)
+    assert main(["test", str(suite), "--config", str(alt), "--no-color"]) == 0
+    assert "alt.yaml" in capsys.readouterr().out, "보고서가 옆의 pack.yaml 을 가리키면 같은 혼동이 남는다"
+
+
+def test_a_pack_file_tests_only_its_own_fixtures(tmp_path, capsys):
+    """팩 파일 이름이 pack.yaml 이 아니면 test 가 폴더를 통째로 훑어, 옆에 둔 다른 팩의 테스트까지 모았다(검토에서
+    실측). 경로를 주지 않으면 그 팩의 tests/ 만 본다."""
+    import shutil
+
+    shutil.copytree(REPO / "policies/kr-core/_legal", tmp_path / "_legal")
+    (tmp_path / "tests").mkdir()
+    shutil.copy(REPO / "policies/kr-core/tests/pipa-22-2.test.yaml", tmp_path / "tests")
+    shutil.copytree(REPO / "policies/kr-core/tests/pipa-22-2", tmp_path / "tests" / "pipa-22-2")
+    shutil.copytree(REPO / "policies/kr-core", tmp_path / "vendored")  # 다른 팩과 그 테스트
+    team = tmp_path / "team.yaml"
+    team.write_text((REPO / "policies/kr-core/pack.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    assert main(["test", "--config", str(team), "--output-format", "json"]) == 0
+    fixtures = {r["file"] for r in json.loads(capsys.readouterr().out)["results"]}
+    assert fixtures and all("vendored" not in f for f in fixtures)
+
+
 def test_language_of():
     assert language_of(Path("a.tsx")) == "typescript"
     assert language_of(Path("a.js")) == "javascript"

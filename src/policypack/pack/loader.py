@@ -17,9 +17,18 @@ from ruamel.yaml.error import YAMLError
 
 from policypack.errors import PackError
 from policypack.model import PolicyPack, Scope, Strength
-from policypack.static.compile import REGION_PATTERNS
+from policypack.static.compile import LANGUAGE_GLOBS, REGION_PATTERNS
 
 _yaml = YAML(typ="safe", pure=True)
+
+
+def pack_location(path: str | Path) -> tuple[Path, Path]:
+    """(정책 팩 파일, 그 팩의 폴더). 폴더를 주면 `<폴더>/pack.yaml` 이다. 폴더에는 `_legal/`·`tests/` 가 있다.
+
+    둘을 따로 들고 다닌다. 파일을 폴더로 바꿔 다시 읽으면, 이름이 pack.yaml 이 아닌 팩 대신 옆의 pack.yaml 을
+    읽는다(실측: test 가 경고 없이 다른 팩을 시험했고, scan 은 다른 파일의 해시를 적었다)."""
+    p = Path(path)
+    return (p / "pack.yaml", p) if p.is_dir() else (p, p.parent)
 
 
 def load_pack(path: str | Path) -> PolicyPack:
@@ -91,6 +100,22 @@ def find_anchor_without_regions(pack: PolicyPack) -> list[str]:
             out.append(
                 f"정책 {pol.id} / 규칙 {rule.id}: {', '.join(missing)} 에는 함수 경계 패턴이 없어 "
                 f"scope: anchor 여도 파일 전체를 한 구역으로 판정합니다"
+            )
+    return out
+
+
+def find_unselected_languages(pack: PolicyPack) -> list[str]:
+    """폴더 검사가 파일을 고르지 않는 언어(compile.LANGUAGE_GLOBS 에 없음)를 쓰는 규칙.
+
+    Semgrep 이 아는 언어여도(rust 등) 폴더를 검사하면 그 언어의 파일은 대상에 들지 않는다. 이름을 댄 파일만
+    검사되어 같은 파일의 판정이 부르는 법에 따라 달라진다(검토에서 실측)."""
+    out = []
+    for pol, rule in pack.iter_rules():
+        missing = [lang for lang in pack.languages_for(rule) if lang not in LANGUAGE_GLOBS]
+        if missing:
+            out.append(
+                f"정책 {pol.id} / 규칙 {rule.id}: {', '.join(missing)} 파일은 폴더 검사에서 고르지 않습니다 "
+                f"(이름을 댄 파일만 검사합니다)"
             )
     return out
 
