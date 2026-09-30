@@ -339,3 +339,74 @@ def test_no_notice_without_a_live_judge(tmp_path, capsys):
     target.write_text("const a = 1;\n", encoding="utf-8")
     main(["scan", str(target), "--no-color"])
     assert "AI 판정자" not in capsys.readouterr().err
+
+
+def test_semgrep_temp_files_live_in_our_state_dir():
+    """신호로 끊기면 semgrep 이 대상 목록·규칙 임시 파일을 지우지 못하고 사용자 임시 폴더에 남겼다(실측)."""
+    env = _env(Path("/x/bin/semgrep"))
+    assert Path(env["TMPDIR"]) == Path(env["SEMGREP_SETTINGS_FILE"]).parent
+
+
+def test_a_user_scheme_semgrep_is_not_ours_inside_a_venv(monkeypatch):
+    """venv 에서는 사용자 site 가 꺼져 있다. ~/.local/bin 의 다른 semgrep 을 '이 환경에 설치된 판'이라 적었다."""
+    import site
+    import sysconfig
+
+    from policypack.static import semgrep_cli
+
+    monkeypatch.setattr(site, "ENABLE_USER_SITE", False)
+    user = sysconfig.get_path("scripts", f"{os.name}_user")
+    assert Path(user) not in semgrep_cli._env_dirs() or Path(user) == Path(sysconfig.get_path("scripts"))
+
+
+@pytest.mark.parametrize(
+    "var,value,msg",
+    [
+        ("POLICYPACK_SEMGREP", "DIR", "실행할 수 있는 파일이 아닙니다"),
+        ("POLICYPACK_SEMGREP_TIMEOUT", "abc", "0보다 큰 초 단위 숫자"),
+        ("POLICYPACK_SEMGREP_TIMEOUT", "-1", "0보다 큰 초 단위 숫자"),
+    ],
+)
+def test_bad_engine_settings_are_clear_errors(tmp_path, monkeypatch, capsys, var, value, msg):
+    """traceback 대신 오류 한 줄과 종료 코드 2."""
+    from policypack.cli import main
+
+    monkeypatch.setenv(var, str(tmp_path) if value == "DIR" else value)
+    (tmp_path / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
+    assert main(["scan", str(tmp_path / "a.ts")]) == 2
+    err = capsys.readouterr().err
+    assert msg in err and "Traceback" not in err
+
+
+def test_a_target_the_engine_did_not_scan_is_not_clean(tmp_path, monkeypatch):
+    """규칙의 언어에 드는 대상을 엔진이 오류 없이 건너뛰었다면 그 '매치 없음'은 거짓이 아니라 '모름'이다. 어떤 규칙의
+    언어도 아닌 파일은 볼 규칙이 없어 건너뛴 것이라 세지 않는다."""
+    js, js2, sh = tmp_path / "a.js", tmp_path / "b.js", tmp_path / "c.sh"
+    config = {"rules": [{"id": "kr.p.r.pred", "languages": ["javascript"], "pattern": "send(...)"}]}
+    engine_json = {"version": "1.176.1", "results": [], "errors": [], "paths": {"scanned": [str(js)]}}
+    monkeypatch.setattr(SemgrepBackend, "raw", lambda self, config, targets: (engine_json, 0.1))
+    res = SemgrepBackend(Path("/x/bin/semgrep")).run(config, [js, js2, sh])
+    assert res.incomplete == {js2}
+
+
+def test_a_relative_engine_path_is_made_absolute(tmp_path, monkeypatch):
+    """semgrep 은 대상 폴더에서 돈다. 상대 경로를 그대로 두면 다른 파일을 불렀다(검토에서 실측: 검사하는 트리 안의
+    bin/semgrep)."""
+    from policypack.static.semgrep_cli import resolve
+
+    (tmp_path / "bin").mkdir()
+    engine = tmp_path / "bin" / "semgrep"
+    engine.write_text("#!/bin/sh\n", encoding="utf-8")
+    engine.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("POLICYPACK_SEMGREP", "bin/semgrep")
+    path, _, _ = resolve()
+    assert path.is_absolute() and path == engine.absolute()
+
+
+def test_an_empty_timeout_setting_means_the_default(monkeypatch):
+    """CI 의 설정 안 된 변수는 빈 값이다. 빈 POLICYPACK_SEMGREP 처럼 없는 것으로 본다."""
+    from policypack.static.semgrep_cli import SemgrepBackend, timeout_from_env
+
+    monkeypatch.setenv("POLICYPACK_SEMGREP_TIMEOUT", "")
+    assert timeout_from_env() == SemgrepBackend.DEFAULT_TIMEOUT

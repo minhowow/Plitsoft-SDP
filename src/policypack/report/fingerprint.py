@@ -27,7 +27,7 @@ def _snippet(path: Path, line: int | None, span: int = 2) -> str:
     if line is None:
         return ""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return ""
     lo, hi = max(0, line - 1 - span), min(len(lines), line + span)

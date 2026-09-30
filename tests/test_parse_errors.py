@@ -243,7 +243,8 @@ def test_semgrep_prefixes_rule_ids_with_the_config_folder(tmp_path, monkeypatch)
     }
     data, _ = SemgrepBackend().raw(config, [target])
     check_id = data["results"][0]["check_id"]
-    assert check_id.endswith(".cfg.kr.p.r.pred")
+    # 접두사는 실행 폴더 기준 설정 폴더 경로다. 실행 폴더가 대상의 폴더(tmp_path)라 `cfg.` 만 붙는다
+    assert check_id == "cfg.kr.p.r.pred" or check_id.endswith(".cfg.kr.p.r.pred")
     assert canonical_rule_id(check_id, rule_table(config)) == "kr.p.r.pred"
 
 

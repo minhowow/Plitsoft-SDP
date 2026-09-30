@@ -39,7 +39,9 @@ class UntestedReason(str, Enum):
     JUDGE_UNAVAILABLE = "judge-unavailable"
     """판정자를 부르지 못했다(연결·인증 실패 등)."""
     JUDGE_UNPARSEABLE = "judge-unparseable"
-    """판정자가 답했지만 쓸 수 없었다(형식 오류, 도구를 쓰려 한 격리 위반)."""
+    """판정자가 답했지만 쓸 수 없었다(형식 오류, 도구를 쓰려 한 격리 위반, 대안 질문에 '해당없음'·'모름')."""
+    CITATION_REJECTED = "citation-rejected"
+    """판정자가 '예'라고 했지만 근거 관문이 인용을 받지 않았다(코드에 없음·주석뿐·낱말 하나 등)."""
     WEAK_UNCONFIRMED = "weak-unconfirmed"
     """이름·문자열만 본 약한 대안이 참인데, 이 규칙에는 확인할 AI 대안이 없어 풀지 않았다."""
     TIMEOUT = "timeout"
@@ -71,8 +73,8 @@ class Finding:
     line: int | None = None
     untested_reasons: list[UntestedReason] = field(default_factory=list)
     ai_pending: list[str] = field(default_factory=list)
-    """AI 에게 물어야 했는데 답을 받지 못한 조건 id. 판정자가 없거나 답하지 못했다. 이 조건은 판정에 넣지
-    않았다 — AI 는 경고를 풀 수만 있으므로, 답이 없으면 정적 판정이 그대로 남는다."""
+    """AI 에게 물어야 했는데 판정에 넣을 답이 없는 조건 id. 판정자가 없거나, 답하지 못했거나, 쓸 수 없는 답(관문이
+    받지 않은 '예', '해당없음'·'모름')이었다. 판정에 넣지 않으므로 정적 판정이 그대로 남는다."""
     trace: list[str] = field(default_factory=list)
     alternatives: list[dict] = field(default_factory=list)
     scope: str = "file"

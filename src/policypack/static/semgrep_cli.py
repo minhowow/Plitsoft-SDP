@@ -19,9 +19,11 @@ from __future__ import annotations
 import atexit
 import datetime
 import json
+import math
 import os
 import re
 import shutil
+import site
 import subprocess
 import sys
 import sysconfig
@@ -31,6 +33,7 @@ from pathlib import Path
 
 from policypack.errors import BackendError
 from policypack.static.backend import StaticResult
+from policypack.static.compile import LANGUAGE_GLOBS
 from policypack.static.parse import TIMEOUT_THRESHOLD, parse_semgrep_json, rule_table
 
 #: 시험한 판. 판이 다르면 같은 팩의 판정이 달라질 수 있어 경고한다(막지는 않는다).
@@ -63,7 +66,9 @@ def _env_dirs() -> list[Path]:
     둔다. semgrep 자신의 진입점도 `sysconfig.get_path("scripts")` 로 짝을 찾는다.
     """
     dirs = [Path(sys.executable).parent]
-    for scheme in (None, f"{os.name}_user"):
+    # 사용자 스킴은 사용자 site 가 켜져 있을 때만 이 환경의 것이다. venv 안에서도 넣으면 ~/.local/bin 의 다른
+    # semgrep 을 '이 환경에 설치된 판'이라고 적었다(끝까지 점검에서 실측)
+    for scheme in (None, f"{os.name}_user") if site.ENABLE_USER_SITE else (None,):
         try:
             d = sysconfig.get_path("scripts", scheme) if scheme else sysconfig.get_path("scripts")
         except KeyError:
@@ -89,9 +94,13 @@ def resolve() -> tuple[Path | None, str, list[str]]:
 
     override = os.environ.get(ENV_VAR)
     if override:
-        p = Path(override)
+        # 절대 경로로 둔다. semgrep 은 대상 폴더에서 돌므로 상대 경로면 다른 파일(검사하는 트리 안의 bin/semgrep
+        # 등)을 부른다. resolve 가 아니라 abspath 다 — 링크의 폴더가 PATH 앞에 붙어야 한다
+        p = Path(os.path.abspath(override))
         if not p.exists():
             raise BackendError(f"{ENV_VAR} 가 가리키는 파일이 없습니다: {p}")
+        if not p.is_file() or not os.access(p, os.X_OK):
+            raise BackendError(f"{ENV_VAR} 가 실행할 수 있는 파일이 아닙니다: {p}")
         return p, f"{ENV_VAR} 환경변수", notes
 
     bundled = _bundled()
@@ -104,7 +113,7 @@ def resolve() -> tuple[Path | None, str, list[str]]:
             f"PATH 의 semgrep 을 씁니다({found}). policypack 과 함께 설치된 판이 없어 버전이 고정되지 않습니다. "
             + REINSTALL_HINT
         )
-        return Path(found), "PATH", notes
+        return Path(os.path.abspath(found)), "PATH", notes
 
     return None, "찾지 못함", ["semgrep 이 없습니다. " + REINSTALL_HINT]
 
@@ -162,6 +171,9 @@ def _env(path: Path | None = None) -> dict[str, str]:
             "SEMGREP_SETTINGS_FILE": str(state / "settings.yml"),
             "SEMGREP_LOG_FILE": str(state / "semgrep.log"),
             "SEMGREP_VERSION_CACHE_PATH": str(state / "semgrep_version"),
+            # semgrep 의 임시 파일(대상 목록·규칙)도 우리 상태 디렉터리에 둔다. 신호로 끊기면 semgrep 이 지우지
+            # 못하고 사용자 임시 폴더에 남았다(실측). 상태 디렉터리는 끝날 때 통째로 지운다
+            "TMPDIR": str(state),
         }
     )
     if path is not None:
@@ -233,13 +245,30 @@ def diagnose() -> dict:
         return {"path": None, "version": None, "source": "오류", "notes": [str(e)]}
     if path is None:
         return {"path": None, "version": None, "source": source, "notes": notes}
-    version = engine_id(path)
+    try:
+        version = engine_id(path)
+    except BackendError as e:
+        # 실행 파일은 있는데 판본을 말하지 못한다(깨진 설치). 진단은 끝까지 낸다
+        return {"path": str(path), "version": None, "source": source, "notes": [*notes, str(e)]}
     if not version.startswith(EXPECTED_VERSION):
         notes.append(
             f"버전이 {version} 입니다. policypack 은 {EXPECTED_VERSION}.x 로 시험했습니다. "
             f"엔진 판이 다르면 같은 팩의 판정이 달라질 수 있습니다."
         )
     return {"path": str(path), "version": version, "source": source, "notes": notes}
+
+
+def timeout_from_env() -> float:
+    raw = os.environ.get("POLICYPACK_SEMGREP_TIMEOUT")
+    if not raw:  # 비어 있으면 없는 것이다(CI 의 설정 안 된 변수)
+        return float(SemgrepBackend.DEFAULT_TIMEOUT)
+    try:
+        t = float(raw)
+    except ValueError:
+        t = math.nan
+    if not math.isfinite(t) or t <= 0:
+        raise BackendError(f"POLICYPACK_SEMGREP_TIMEOUT 은 0보다 큰 초 단위 숫자여야 합니다: {raw!r}")
+    return t
 
 
 class SemgrepBackend:
@@ -252,7 +281,7 @@ class SemgrepBackend:
                 raise BackendError("semgrep 을 찾지 못했습니다. " + REINSTALL_HINT)
         self.path = path
         self._version: str | None = None
-        self.timeout = float(os.environ.get("POLICYPACK_SEMGREP_TIMEOUT", self.DEFAULT_TIMEOUT))
+        self.timeout = timeout_from_env()
 
     def version(self) -> str:
         if self._version is None:
@@ -294,6 +323,16 @@ class SemgrepBackend:
     def _run_once(self, config: dict, targets: list[Path]) -> StaticResult:
         data, elapsed = self.raw(config, targets)
         result = parse_semgrep_json(data, rule_table(config))
+        # 규칙의 언어에 드는 대상을 엔진이 오류 없이 건너뛰었다면 그 '매치 없음'은 거짓이 아니다. 어떤 규칙의 언어도
+        # 아닌 파일(이름을 댄 deploy.sh 등)은 볼 규칙이 없어 건너뛴 것이라 세지 않는다
+        exts = {
+            g.lstrip("*")
+            for r in config.get("rules", [])
+            for lang in r.get("languages", [])
+            for g in LANGUAGE_GLOBS.get(lang, [])
+        }
+        scanned = {Path(p).resolve() for p in (data.get("paths") or {}).get("scanned", [])}
+        result.incomplete |= {t for t in targets if t.suffix in exts and t.resolve() not in scanned}
         if result.unlocated_errors:
             # 어느 파일인지 모르는 파일 단위 오류: 이 실행의 대상 어느 것의 '거짓'도 믿을 수 없다.
             # 파싱 실패와 달리 정규식 사본까지 믿지 않는다(incomplete)
@@ -315,6 +354,14 @@ class SemgrepBackend:
             payload = json.dumps(config, ensure_ascii=False, default=_json_default)
         except (TypeError, ValueError) as e:
             raise BackendError(f"semgrep 설정을 만들지 못했습니다: {e}") from e
+        # 대상은 절대 경로로 넘기고 그 공통 조상 폴더에서 돌린다. 대상이 실행 위치 밖이면 semgrep 이 대상마다 따로
+        # 파일 찾기를 해 5~7배 느렸다(끝까지 점검에서 실측). 이름을 댄 파일은 .gitignore·test 폴더와 무관하게 검사한다
+        abs_targets = [os.path.abspath(t) for t in targets]
+        try:
+            common = os.path.commonpath(abs_targets) if abs_targets else None
+        except ValueError:  # 윈도에서 드라이브가 다르다
+            common = None
+        run_dir = common if common is None or os.path.isdir(common) else os.path.dirname(common)
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as f:
             f.write(payload)
             cfg = f.name
@@ -340,11 +387,11 @@ class SemgrepBackend:
             # 여기부터는 대상이다. 없으면 '-' 로 시작하는 파일 이름이 옵션이 된다(실측: `--json-output=index.ts`
             # 라는 파일이 있으면 semgrep 이 index.ts 를 결과 JSON 으로 덮어썼고, `-x.ts` 하나로 검사 전체가 실패했다)
             "--",
-            *[str(t) for t in targets],
+            *abs_targets,
         ]
         t0 = time.time()
         try:
-            # 대상 이름이 정확히 '-' 면 `--` 뒤여도 semgrep 은 표준 입력을 읽는다. 터미널을 기다리며 멈추지 않게 막는다
+            # 표준 입력은 막는다. 터미널 입력을 기다리며 멈추지 않게 한다
             proc = subprocess.run(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -353,7 +400,10 @@ class SemgrepBackend:
                 errors="replace",
                 env=_env(self.path),
                 timeout=self.timeout,
+                cwd=run_dir,
             )
+        except OSError as e:
+            raise BackendError(f"semgrep 을 실행하지 못했습니다({self.path}): {e.strerror or e}") from e
         except subprocess.TimeoutExpired as e:
             # 시간 제한이 없으면 커밋 전 훅과 CI 가 영원히 멈춘다
             raise BackendError(
@@ -370,4 +420,10 @@ class SemgrepBackend:
             data = json.loads(proc.stdout)
         except json.JSONDecodeError as e:
             raise BackendError(f"semgrep JSON 을 읽지 못했습니다: {e}\n{proc.stdout[:500]}") from e
+        if not (
+            isinstance(data, dict)
+            and isinstance(data.get("results", []), list)
+            and isinstance(data.get("errors", []), list)
+        ):
+            raise BackendError(f"semgrep 출력 형식이 예상과 다릅니다: {proc.stdout[:300]}")
         return data, elapsed

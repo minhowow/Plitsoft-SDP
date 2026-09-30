@@ -88,10 +88,9 @@ def test_tests_directory_does_not_change_the_pack_digest(tmp_path):
 
 
 def test_uncited_yes_cannot_clear(tmp_path):
-    """방향성 신뢰. 인용 없는 '예'는 '모름'이 되어 경고가 남는다."""
-    suite = write_suite(
-        tmp_path, "  - file: ai-guard.ts\n    expect: needs-review-uncertain\n    ai: {ai-guard: yes}\n"
-    )
+    """방향성 신뢰. 인용 없는 '예'는 판정에 넣지 않아 경고가 남는다. 판정자가 없을 때와 같은 확실한 경고다 —
+    '불확실'로 낮추면 --fail-on review 가 근거 없는 답 하나로 통과했다(끝까지 점검에서 실측)."""
+    suite = write_suite(tmp_path, "  - file: ai-guard.ts\n    expect: needs-review\n    ai: {ai-guard: yes}\n")
     code, out = run_json(str(suite))
     assert code == 0, out["results"]
 
@@ -105,7 +104,8 @@ def test_citation_that_is_not_in_the_code_cannot_clear(tmp_path):
     code, out = run_json(str(suite))
     assert code == 1
     row = next(r for r in out["results"] if r["rule"] == RULE)
-    assert row["actual"] == "needs-review-uncertain"
+    assert row["actual"] == "needs-review"
+    assert any("인용 불인정(not-found)" in t for t in row["decision_path"]), "받지 않은 인용과 까닭을 남긴다"
 
 
 def test_unanswered_question_fails_even_if_the_outcome_matches(tmp_path):
@@ -140,7 +140,7 @@ def test_same_file_twice_with_different_stubs(tmp_path):
         tmp_path,
         "  - file: ai-guard.ts\n    id: cited\n    expect: compliant\n"
         f"    ai: {{ai-guard: {{answer: yes, cite: '{cite}'}}}}\n"
-        "  - file: ai-guard.ts\n    id: uncited\n    expect: needs-review-uncertain\n    ai: {ai-guard: yes}\n",
+        "  - file: ai-guard.ts\n    id: uncited\n    expect: needs-review\n    ai: {ai-guard: yes}\n",
     )
     code, out = run_json(str(suite))
     assert code == 0, [r for r in out["results"] if not r["passed"]]

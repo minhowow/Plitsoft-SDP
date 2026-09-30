@@ -38,7 +38,7 @@ class Target:
 
     @property
     def code(self) -> str:
-        return self.path.read_text(encoding="utf-8")
+        return self.path.read_text(encoding="utf-8", errors="replace")
 
     @property
     def raw_lines(self) -> list[str]:
@@ -63,10 +63,10 @@ class Unit:
     reasons: list[UntestedReason] = field(default_factory=list)
     """판정을 끝까지 하지 못한 이유(파싱 실패, 판정자 없음, 답 없음 …). 판정 종류와 상관없이 쌓인다."""
     pending: list[str] = field(default_factory=list)
-    """AI 에게 물어야 했는데 답을 받지 못한 조건 id('applies-ai' 또는 대안 id)."""
+    """AI 에게 물어야 했는데 판정에 넣을 답이 없는 조건 id('applies-ai' 또는 대안 id)."""
     unanswered: list[tuple[Predicate, str]] = field(default_factory=list)
-    """답을 받지 못한 AI 대안과 그 까닭(판정자 없음·판정자 실패·스텁 없음). 판정에 넣지 않는다 — AI 는
-    경고를 풀 수만 있으므로, 답이 없으면 판정자가 없을 때와 같은 결론이다."""
+    """판정에 넣지 않은 AI 대안과 그 까닭(판정자 없음·실패·스텁 없음·쓸 수 없는 답). 판정자가 없을 때와 같은
+    결론이 나게 한다 — AI 답은 근거가 있을 때만 경고를 풀고, 근거 없는 답이 결론을 흐리지 못한다."""
     cited: dict[str, str] = field(default_factory=dict)
     """AI 대안 id → 관문을 통과한 인용이 코드의 어디에 있었는지(GateResult 값). AI 해제 기록에 쓴다."""
     anchor: Span | None = None
@@ -432,9 +432,12 @@ class EvalResult:
     questions_asked: int = 0
     """판정자에게 넘긴 질문 수(답을 받지 못한 것 포함)."""
     ai_answered: int = 0
-    """쓸 만한 답을 받은 질문 수. 판정자가 실패했거나 스텁이 없는 질문은 빠진다."""
+    """형식에 맞는 답을 받은 질문 수(관문이 받지 않은 답도 포함). 판정자가 실패했거나 스텁이 없는 질문은 빠진다."""
+    questions_sent: int = 0
+    """판정자에게 실제로 보낸 서로 다른 질문 수. 같은 질문은 한 실행에서 한 번만 보내므로(OncePerRun)
+    questions_asked 보다 적을 수 있다. 어댑터 안의 재시도는 세지 않는다. cmd_scan 이 판정자에게서 받아 적는다."""
     ai_pending: int = 0
-    """AI 에게 물어야 했는데 답을 받지 못하고 경고로 남은 판정 단위 수(판정자 없음 포함). 다른 대안이 풀어
+    """AI 에게 물어야 했는데 판정에 넣을 답이 없어 경고로 남은 판정 단위 수(판정자 없음 포함). 다른 대안이 풀어
     준수가 된 단위는 세지 않는다 — 답을 받았어도 결론이 바뀌지 않는다."""
     ai_cleared: list[dict] = field(default_factory=list)
     """AI 의 '예'로 경고가 풀린 단위. 규칙·파일·인용한 줄·관문 결과를 남겨 사람이 검토할 수 있게 한다."""
@@ -543,8 +546,8 @@ def _answer_to_tri(answer: Answer, code: str | None = None, strict: bool = False
     """모델 답 → 세 값. 근거 관문이 여기서 적용된다(판정자 안이 아니라).
 
     `code` 를 주면 '예'는 그 코드에 실제로 있는 줄을 인용해야 참이다. 인용이 없거나 틀리면 '거짓'이 아니라
-    '모름'이다 — 경고가 남는다. 적용 질문은 `code` 없이 부른다. 적용의 '예'는 경고를 올리는 쪽이라 인용을
-    요구하지 않는다. 판정자 실패(raw '?')와 '해당없음'은 '모름'이다.
+    '모름'이다 — 경고가 남는다. 대안 질문의 '모름'은 evaluate 가 판정에서 빼고 까닭을 남긴다. 적용 질문은
+    `code` 없이 부른다. 적용의 '예'는 경고를 올리는 쪽이라 인용을 요구하지 않는다. '해당없음'과 '?'는 '모름'이다.
     """
     if answer.raw == "예":
         if code is None or is_grounded(answer.evidence, code, strict=strict, stripped=stripped):
@@ -553,6 +556,14 @@ def _answer_to_tri(answer: Answer, code: str | None = None, strict: bool = False
     if answer.raw == "아니오":
         return FALSE
     return UNKNOWN
+
+
+def _rejection(a: Answer, u: Unit, strict: bool) -> str:
+    """관문이 '예'의 인용을 받지 않은 까닭(evidence.GateResult 값 또는 '판정 구역 밖'). 보고서에 남겨 사람이 AI 의
+    주장을 확인할 수 있게 한다."""
+    if u.narrowed and _answer_to_tri(a, u.target.code, strict=strict) is TRUE:
+        return "판정 구역 밖"
+    return classify(a.evidence, u.gate_code(), stripped=u.gate_stripped()).value
 
 
 def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judge: Judge | None = None) -> EvalResult:
@@ -701,6 +712,10 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
             continue
         u.applies = _answer_to_tri(a)
         u.trace.append(f"적용: AI {a.raw} → {u.applies}")
+        if u.applies is UNKNOWN:
+            # '해당없음'·'모름'은 적용을 정하지 못한다. 대안 질문처럼 판정자가 없을 때와 같이 두고 까닭을 남긴다
+            u.pending.append("applies-ai")
+            u.add_reason(UntestedReason.JUDGE_UNPARSEABLE)
         if u.applies is FALSE:
             # 인용 없이 단위가 빠진다. 사람이 볼 수 있게 남긴다
             result.ai_dismissed.append(
@@ -765,10 +780,21 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
             # strict 조건은 '이 문구가 코드에 실제로 있는가'를 묻는다. 줄 끝 주석이 붙은 인용도 받지 않는다
             strict = pred.ai.evidence is Evidence.STRICT
             value = _answer_to_tri(a, u.gate_code(), strict=strict, stripped=u.gate_stripped())
+            if value is UNKNOWN:
+                # 판정에 넣는 답은 '아니오'와 인용이 관문을 지난 '예'뿐이다. 나머지(인용이 틀린 '예', '해당없음',
+                # '모름')는 판정자가 없을 때처럼 빼고 까닭을 남긴다. 넣으면 근거 없는 답 하나가 확실한 '검토 필요'를
+                # '불확실'로 낮춰 --fail-on review 를 통과시켰다(끝까지 점검에서 실측)
+                u.pending.append(pred.id)
+                if a.raw == "예":
+                    u.add_reason(UntestedReason.CITATION_REJECTED)
+                    why = _rejection(a, u, strict)
+                    u.unanswered.append((pred, f"AI 예 — 인용 불인정({why}): “{a.evidence[:120]}”"))
+                else:
+                    u.add_reason(UntestedReason.JUDGE_UNPARSEABLE)
+                    u.unanswered.append((pred, f"AI {a.raw} — 대안 질문에 쓸 수 없는 답"))
+                continue
             if value is TRUE:
                 u.cited[pred.id] = classify(a.evidence, u.gate_code(), stripped=u.gate_stripped()).value
-            elif u.narrowed and a.raw == "예" and _answer_to_tri(a, u.target.code, strict=strict) is TRUE:
-                u.trace.append(f"대안 {pred.id}: 인용이 판정 구역 밖이다")
             u.ai_alts.append((pred, a, value))
     result.ai_seconds = time.time() - t0
 

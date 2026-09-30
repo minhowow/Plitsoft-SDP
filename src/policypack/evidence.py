@@ -1,8 +1,12 @@
 """근거 관문 — AI가 경고를 해제할 자격이 있는지 본다.
 
-AI의 "예, 적법한 대안이 있다"는 **코드에 실제로 있는 줄을 인용할 때만** 인정한다.
-인용이 틀리면 '거짓'이 아니라 '모름'이 되어 경고가 남는다. 이 비대칭이 방향성 신뢰의
-핵심이다 — 약한 근거는 경고를 올릴 수는 있어도 내릴 수는 없다.
+AI의 "예, 적법한 대안이 있다"는 **코드에 실제로 있는 코드를 인용할 때만** 인정한다. 인용은 코드에 글자 그대로
+(공백만 느슨하게) 있는 6자 이상의 연속된 조각이어야 하고, 줄 전체가 아닌 낱말 하나(`router`, `prisma`)는 받지
+않는다. 관문은
+인용이 코드에 있는지만 본다 — 그 줄이 질문과 관련 있는지는 보지 않는다. 그래서 AI 가 푼 경고는 인용과 함께
+보고서에 남는다.
+관문이 받지 않은 '예'는 '거짓'이 되지 않고 판정에서 빠져(판정자가 없을 때처럼) 경고가 남는다. 이 비대칭이
+방향성 신뢰의 핵심이다 — 약한 근거는 경고를 올릴 수는 있어도 내릴 수는 없다.
 
 주석은 실행되지 않으므로 대안의 존재를 입증하지 못한다. 주석에서만 찾은 인용은 떨어진다.
 줄 끝에 주석이 붙은 코드 줄을 인용하면 주석을 뗀 나머지가 실행되는 코드에 있어야 한다
@@ -21,6 +25,7 @@ MIN_LENGTH = 6
 """인용이 이보다 짧으면 버린다. `}` 나 `true` 같은 것은 아무것도 입증하지 못한다."""
 
 _WS = re.compile(r"\s+")
+_WORD = re.compile(r"[\w$]+")
 
 
 class GateResult(str, Enum):
@@ -37,6 +42,9 @@ class GateResult(str, Enum):
     """코드에 없다. 지어냈거나 고쳐 쓴 것이다."""
 
     TOO_SHORT = "too-short"
+    BARE_WORD = "bare-word"
+    """낱말 하나인데 코드 줄 전체도 아니다. 식별자 이름은 무엇도 입증하지 못한다(실측: `router` 로 경고가 풀렸다).
+    줄 전체가 그 낱말이면(JSX 글자 줄 `AI생성요약`) 받는다."""
     EMPTY = "empty"
 
 
@@ -103,6 +111,8 @@ def classify(evidence: str, code: str, stripped: str | None = None) -> GateResul
         return GateResult.NOT_FOUND
 
     without = stripped if stripped is not None else strip_comments(code)
+    if _WORD.fullmatch(ev) and ev not in {_norm(line) for line in without.splitlines()}:
+        return GateResult.BARE_WORD
     if ev in _norm(without):
         return GateResult.GROUNDED
 
@@ -110,7 +120,9 @@ def classify(evidence: str, code: str, stripped: str | None = None) -> GateResul
     # 코드 줄 끝의 주석에 걸쳐 있었는지 가른다.
     for raw, bare in zip(code.splitlines(), without.splitlines(), strict=True):
         if ev in _norm(raw):
-            return GateResult.COMMENT_ONLY if not _norm(bare) else GateResult.TRAILING_COMMENT
+            # 줄 끝 주석이 붙은 코드 줄을 인용했는가, 그 줄의 주석 글만 인용했는가
+            code_part = _norm(strip_comments(evidence))
+            return GateResult.TRAILING_COMMENT if code_part and code_part in _norm(bare) else GateResult.COMMENT_ONLY
     return GateResult.TRAILING_COMMENT
 
 

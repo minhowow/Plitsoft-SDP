@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from policypack import __version__
 from policypack.packtest import CLEAR, TestRun, matches
@@ -82,7 +83,9 @@ def render(run: TestRun, root, explain: bool = False, color: bool | None = None,
             )
         )
     if pack_path is not None:
-        out.append(st.dim(f"팩  {rel(pack_path, root)}"))
+        # 실행 위치 밖의 팩(설치본 등)을 ../../.. 로 적으면 읽기 어렵다. 그때는 절대 경로다
+        inside = root is None or pack_path.resolve().is_relative_to(Path(root).resolve())
+        out.append(st.dim(f"팩  {rel(pack_path, root) if inside else pack_path.resolve()}"))
     out.append(f"{head}  {' · '.join(parts)}  ({tail}, 모델 호출 0회)")
     return "\n".join(out)
 

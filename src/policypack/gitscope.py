@@ -57,7 +57,12 @@ def _git(args: list[str], cwd: Path) -> str:
 
 
 def repo_root(start: Path) -> Path:
-    return Path(_git(["rev-parse", "--show-toplevel"], start).strip())
+    try:
+        return Path(_git(["rev-parse", "--show-toplevel"], start).strip())
+    except ConfigError as e:
+        if "not a git repository" not in str(e):
+            raise
+        raise ConfigError(f"git 저장소가 아닙니다: {start}. --staged·--diff 는 git 저장소에서만 씁니다.") from e
 
 
 def _names(output: str, root: Path) -> list[Path]:

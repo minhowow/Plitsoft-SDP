@@ -286,3 +286,52 @@ def test_ref_that_looks_like_an_option_is_not_an_option(repo, capsys):
     target = repo / "written-by-git"
     assert main(["scan", f"--diff=--output={target}", "--no-color"]) == 2
     assert not target.exists()
+
+
+def test_an_empty_diff_ref_is_an_error(repo, capsys):
+    """CI 에서 REF 변수가 비면(--diff "$BASE_REF") 전체 검사로 조용히 바뀌었다."""
+    assert main(["scan", "--diff", ""]) == 2
+    assert "REF 가 비었습니다" in capsys.readouterr().err
+
+
+def test_a_full_scan_reports_repo_relative_paths_from_a_subfolder(repo, monkeypatch, capsys):
+    """전체 검사도 범위 검사처럼 저장소 루트 기준으로 적는다. 실행 위치 기준이면 하위 폴더에서 돌릴 때 같은 경고의
+    uri 와 지문이 달라졌다(끝까지 점검에서 실측)."""
+    (repo / "sub").mkdir()
+    (repo / "sub" / "a.js").write_text(VIOLATING, encoding="utf-8")
+
+    def sarif(*paths) -> dict:
+        main(["scan", *paths, "--output-format", "sarif"])
+        res = json.loads(capsys.readouterr().out)["runs"][0]["results"]
+        return {r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]: r["partialFingerprints"] for r in res}
+
+    at_root = sarif()
+    monkeypatch.chdir(repo / "sub")
+    assert sarif() == sarif(".") == at_root
+    assert set(at_root) == {"sub/a.js"}
+
+
+def test_outside_a_repo_the_scope_error_says_so(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert main(["scan", "--staged"]) == 2
+    assert "git 저장소가 아닙니다" in capsys.readouterr().err
+
+
+def test_the_hook_passes_files_after_a_separator_and_skips_generated_files():
+    """훅은 파일 이름을 댄다. 이름을 댄 파일은 거르지 않으므로 생성물·번들을 훅 정의에서 --staged 처럼 뺀다. 목록이
+    어긋나면 커밋할 때와 --staged 의 판정이 달라진다. '-' 로 시작하는 이름이 옵션이 되지 않게 `--` 뒤에 붙인다."""
+    import re
+
+    from ruamel.yaml import YAML
+
+    from policypack.discover import GENERATED_SUFFIXES, SKIP_DIRS
+
+    hook = YAML(typ="safe", pure=True).load((Path(__file__).parents[1] / ".pre-commit-hooks.yaml").read_text())[0]
+    assert hook["args"] == ["--"]
+    rx = re.compile(hook["exclude"])
+    for d in SKIP_DIRS:
+        assert rx.search(f"{d}/x.ts") and rx.search(f"a/{d}/x.ts"), d
+    for s in GENERATED_SUFFIXES:
+        assert rx.search(f"a/x{s}"), s
+    for kept in ("src/app.ts", "test/x.ts", "builder/x.ts", "src/distance.ts"):
+        assert not rx.search(kept), kept

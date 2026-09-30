@@ -6,8 +6,13 @@
   name: 국내 법·정책 검토
   description: 커밋하려는 코드에서 법·정책상 검토가 필요한 지점을 찾는다
   entry: policypack scan
+  # 파일 목록 앞의 `--`. 없으면 '-' 로 시작하는 파일 이름이 옵션으로 읽힌다. args 를 바꾸면 끝에 `--` 를 둔다.
+  args: ["--"]
   language: python
   types_or: [javascript, jsx, ts, tsx]
+  # 이름을 댄 파일은 거르지 않으므로(policypack scan <파일>), 생성물·축소 번들은 여기서 뺀다. --staged 가
+  # 빼는 것과 같다(discover.SKIP_DIRS·GENERATED_SUFFIXES, 시험이 맞춰 본다). 1MB 초과 파일은 걸러지지 않는다.
+  exclude: '(^|/)(\.git|\.hg|\.svn|node_modules|\.venv|venv|__pycache__|dist|build|\.next|\.nuxt|\.output|coverage|\.pytest_cache|\.ruff_cache|\.mypy_cache|vendor|\.yarn)/|\.min\.(js|mjs|cjs|jsx|ts|tsx)$|\.bundle\.js$|\.pnp\.(cjs|js|loader\.mjs)$'
   # 바뀐 파일만 넘긴다. pre-commit 이 파일 목록을 인자로 붙여 준다.
   pass_filenames: true
   require_serial: false

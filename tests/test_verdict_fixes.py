@@ -184,13 +184,15 @@ def test_pending_ai_is_counted_only_where_a_warning_remains(pack):
     assert _pipa(res) == [] and res.ai_pending == 0
 
 
-def test_a_judge_that_answers_unknown_has_answered(pack):
-    """판정자가 '모름'(?)이라고 답한 것은 실패가 아니다. '모름'으로 넣어 불확실로 남기고, 판정자를 부르지 못했다고
-    적지 않는다. 실패로 다루자 스텁 unknown 이 판정자 없음과 같은 확실한 경고가 됐다(검토에서 실측)."""
+def test_an_unusable_answer_counts_like_no_judge_but_says_why(pack):
+    """판정에 넣는 AI 답은 '아니오'와 인용이 관문을 지난 '예'뿐이다. '모름'(?)을 '모름'으로 넣으면 확실한 경고가
+    '불확실'로 낮아져 --fail-on review 를 통과했다. 판정자가 없을 때와 같은 판정을 내고, 부르지 못한 것이 아니라
+    답을 쓸 수 없었다고 적는다."""
     res = _run(pack, FIX / "pipa-22-2" / "ai-guard.ts", judge=FakeJudge("?"))
     [f] = _pipa(res)
-    assert f.outcome is Outcome.NEEDS_REVIEW_UNCERTAIN
-    assert f.untested_reasons == [] and f.ai_pending == []
+    none = _pipa(_run(pack, FIX / "pipa-22-2" / "ai-guard.ts"))[0]
+    assert f.outcome is none.outcome is Outcome.NEEDS_REVIEW
+    assert [r.value for r in f.untested_reasons] == ["judge-unparseable"] and f.ai_pending == ["ai-guard"]
     assert res.ai_answered >= 1
 
 
@@ -291,6 +293,40 @@ def test_a_fixture_the_engine_cannot_read_is_rejected(tmp_path):
 
 
 # ── 인코딩 ─────────────────────────────────────────────────────────────────
+
+
+def test_a_bare_word_citation_cannot_clear():
+    """관문은 인용이 코드에 있는지만 본다. 낱말 하나(`router`, `prisma`)로 경고가 풀렸다(끝까지 점검에서 실측)."""
+    from policypack.evidence import GateResult, classify
+
+    code = 'router.post("/signup", async (req, res) => {\n  await prisma.user.create({ data: req.body });\n});\n'
+    for word in ("router", "prisma", "signup"):
+        assert classify(word, code) is GateResult.BARE_WORD and not is_grounded(word, code)
+    assert is_grounded("await prisma.user.create({ data: req.body });", code)
+    assert is_grounded("async (req, res) =>", code), "낱말이 아닌 조각은 줄 전체가 아니어도 받는다"
+    label = "export const Badge = () => (\n  <span>\n    AI생성요약\n  </span>\n);\n"
+    assert is_grounded("AI생성요약", label), "줄 전체가 그 낱말이면 코드 한 줄을 그대로 인용한 것이다"
+
+
+def test_a_quote_from_a_trailing_comment_is_labelled_comment_only():
+    """코드 줄 끝 주석의 글만 인용했으면 주석 인용이다. trailing-comment 는 코드 줄을 통째로 인용한 경우다."""
+    from policypack.evidence import GateResult, classify
+
+    code = 'import { V } from "@/lib/terms"; // 약관 제7조: 생성형 인공지능 기반\n'
+    assert classify("약관 제7조: 생성형 인공지능 기반", code) is GateResult.COMMENT_ONLY
+    assert classify(code.strip(), code) is GateResult.TRAILING_COMMENT
+
+
+def test_an_unusable_applies_answer_is_reported(pack):
+    """적용 질문의 '해당없음'·'모름'은 적용을 정하지 못한다. 대안 질문처럼 'AI 확인 필요'와 까닭이 남는다."""
+    path = FIX / "pipa-22-2" / "violating.ts"
+    static = SemgrepBackend().run(compile_static(pack), [path])
+    key = next(m.key for m in static.matches if m.key.policy == "kr.pipa.22-2" and m.key.group == "applies-when")
+    static.matches = [m for m in static.matches if m.key != key]
+    static.predicate_timeouts[path] = [key]  # 적용 조건 하나가 끝나지 않아 적용이 '모름'
+    res = evaluate(pack, [Target(path=path, lang="typescript")], static, judge=FakeJudge("해당없음"))
+    [f] = _pipa(res)
+    assert "applies-ai" in f.ai_pending and "judge-unparseable" in [r.value for r in f.untested_reasons]
 
 
 def test_files_that_are_not_utf8_are_reported_as_unscanned(tmp_path):

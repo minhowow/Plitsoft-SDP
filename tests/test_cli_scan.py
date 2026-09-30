@@ -513,3 +513,74 @@ def test_dates_in_a_rule_body_do_not_break_the_run(tmp_path, capsys):
     )
     (tmp_path / "a.ts").write_text("// 2026-09-29\nexport const a = 1;\n", encoding="utf-8")
     assert main(["scan", str(tmp_path / "a.ts"), "--config", str(pack), "--no-color"]) == 1
+
+
+def test_usage_errors_are_reported_like_other_errors(capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["scan", "--no-such-flag"])
+    assert e.value.code == 2 and "오류:" in capsys.readouterr().err
+
+
+def test_ctrl_c_is_one_line_not_a_traceback(monkeypatch, capsys):
+    import policypack.cli as cli
+
+    def interrupted(args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setitem(cli.COMMANDS, "scan", interrupted)
+    assert main(["scan", VIOLATING]) == 130
+    assert "중단했습니다" in capsys.readouterr().err
+
+
+def test_sarif_points_only_at_addresses_we_have(sarif):
+    """우리가 갖지 않은 저장소 주소(github.com/policypack/policypack)를 도구 주소·도움말 주소로 넣었다."""
+    driver = sarif["runs"][0]["tool"]["driver"]
+    assert "informationUri" not in driver
+    assert all(r.get("helpUri", "https://www.law.go.kr").startswith("https://www.law.go.kr") for r in driver["rules"])
+
+
+def test_summary_names_files_by_their_report_path(tmp_path, monkeypatch, capsys):
+    """이름만 적으면 index.ts 가 여럿인 저장소에서 어느 파일인지 모른다."""
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "index.ts").write_text("export const x = ;\n", encoding="utf-8")  # 파싱 실패
+    monkeypatch.chdir(tmp_path)
+    run(".", "--no-color")
+    assert "a/b/index.ts" in capsys.readouterr().out
+
+
+def test_a_named_file_no_rule_reads_is_not_a_gap(tmp_path, monkeypatch, capsys):
+    """어떤 규칙의 언어도 아닌 파일(이름을 댄 deploy.sh)은 볼 규칙이 없어 건너뛴 것이다. 엔진이 끝내지 못한 것으로
+    세자 규칙 9개가 모두 '불확실'이 됐다(검토에서 실측)."""
+    (tmp_path / "deploy.sh").write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert run("deploy.sh", "--output-format", "json") == 0
+    assert json.loads(capsys.readouterr().out)["run"]["incomplete"] == []
+
+
+def test_the_same_file_has_one_report_path_however_it_is_named(tmp_path, monkeypatch, capsys):
+    """`..` 가 남으면 같은 파일이 쓰기에 따라 다른 uri·지문이 된다."""
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "a.ts").write_text((REPO / VIOLATING).read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path / "sub")
+
+    def uris(*args):
+        run(*args, "--output-format", "json")
+        return {f["file"] for f in json.loads(capsys.readouterr().out)["findings"]}
+
+    assert uris("../sub") == uris(".") == uris(str(tmp_path / "sub" / "a.ts"))
+
+
+def test_sarif_rule_descriptions_are_always_text(tmp_path, capsys):
+    """rationale 에 motivation 만 있으면 fullDescription.text 가 null 이 되어 SARIF 가 스키마에 어긋났다."""
+    import re
+    import shutil
+
+    pack = tmp_path / "pack"
+    shutil.copytree(REPO / "policies/kr-core", pack, ignore=shutil.ignore_patterns("tests"))
+    text = (pack / "pack.yaml").read_text(encoding="utf-8")
+    stripped = re.sub(r"^      implementation:.*\n", "", text, count=1, flags=re.M)  # motivation 만 남긴다
+    assert stripped != text
+    (pack / "pack.yaml").write_text(stripped, encoding="utf-8")
+    run(VIOLATING, "--config", str(pack), "--output-format", "sarif")
+    rules = json.loads(capsys.readouterr().out)["runs"][0]["tool"]["driver"]["rules"]
+    assert all(isinstance(r["fullDescription"]["text"], str) for r in rules)

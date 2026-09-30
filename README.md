@@ -38,10 +38,11 @@ compliant-if-any:            # 적법한 대안. 하나라도 참이면 준수
 
 - **약한 대안은 혼자 경고를 풀지 못한다.** 이름·문자열만 본 정적 대안(`strength: weak`)이 참이면
   판정자에게 다시 묻는다. 판정자가 없으면 그런 곳은 '불확실'로 남는다.
-- **AI 의 '예'는 인용이 있어야 한다.** 인용 전체가 코드에 있어야 하고, 주석에서만 찾은 인용은 받지 않는다.
-  줄 끝에 주석이 달린 코드 줄은 코드 부분이 실재하면 받는다. "이 문구가 코드에 있는가"를 묻는 조건은
-  `evidence: strict` 로 적어 줄 끝 주석까지 받지 않는다. 인용이 틀리면 '거짓'이 아니라 '모름'이 되어
-  경고가 남는다.
+- **AI 의 '예'는 인용이 있어야 한다.** 인용은 코드에 글자 그대로(공백만 느슨하게) 있는 6자 이상의 조각이어야
+  하고, 낱말 하나(`router` 같은 이름)나 주석에서만 찾은 인용은 받지 않는다. 줄 끝에 주석이 달린 코드 줄은 코드
+  부분이 실재하면 받는다. "이 문구가 코드에 있는가"를 묻는 조건은 `evidence: strict` 로 적어 줄 끝 주석까지
+  받지 않는다. 관문이 받지 않은 '예'와 '해당없음'·'모름'은 판정에 넣지 않는다. 판정자가 없을 때처럼 경고가
+  남고, 까닭(인용 불인정과 그 인용)을 판정 경로에 적는다.
 - **AI 차례를 숨기지 않는다.** 판정자가 없거나(`--judge none`, 기본) 답하지 못하면, AI 에게 물었어야 할
   곳을 'AI 확인 필요'로 보고한다. 그 AI 대안은 판정에 넣지 않으므로 정적 판정이 그대로 남는다. 판정자가
   없을 때와 고장 났을 때 판정이 같다. 판정자가 연달아 세 번 시간 안에 답하지 않으면 그 실행에서는 더 묻지
@@ -88,8 +89,10 @@ repos:
       - id: policypack
 ```
 
-훅에서 AI 판정자를 켜려면(`args: [--judge, claude-cli:haiku]`) `verbose: true` 도 함께 둔다. pre-commit 은
-통과한 훅의 출력을 숨겨서, 무엇이 밖으로 나가는지 알리는 한 줄이 보이지 않는다.
+훅은 커밋하려는 JS/TS 파일을 `--` 뒤에 붙여 넘기고, 생성물 디렉터리(node_modules·dist 등)와 축소 번들은
+`--staged` 처럼 뺀다. `args` 를 바꾸면 끝에 `--` 를 둔다. 훅에서 AI 판정자를 켜려면
+`args: [--judge, claude-cli:haiku, --]` 에 `verbose: true` 도 함께 둔다. pre-commit 은 통과한 훅의 출력을
+숨겨서, 무엇이 밖으로 나가는지 알리는 한 줄이 보이지 않는다.
 
 GitHub Actions 의 호스티드 러너에는 Python 과 pipx 가 이미 있다. PyPI 에 올리기 전에는 저장소에서
 설치한다. 이름만으로 설치하면(`pipx install policypack`) 아직 등록되지 않은 PyPI 이름을 찾게 되고,
@@ -107,7 +110,7 @@ GitHub Actions 의 호스티드 러너에는 Python 과 pipx 가 이미 있다. 
 ```bash
 uv sync
 uv run policypack scan src/                       # 정적 조건만 (AI 호출 0회)
-uv run policypack scan src/ --explain             # 판정 경로까지
+uv run policypack scan src/ --output-format concise --explain  # 짧은 출력에 판정 경로 (full 은 늘 싣는다)
 uv run policypack scan src/ --output-format sarif # 근거 조문이 help.markdown 에 실린다
 uv run policypack scan --staged                    # 스테이징된 파일만 (커밋 전 훅)
 uv run policypack scan --diff origin/main          # 분기점 이후 이 브랜치가 바꾼 파일만 (CI)

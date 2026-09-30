@@ -220,10 +220,10 @@ cases:
   - file: ai-basic-act-31-1/terms-gate.tsx
     id: terms-gate-comment-cite
     note: >
-      같은 파일에 판정자가 '예'를 하고 4행 주석을 인용한 경우. 주석 인용은 받지 않는다. 인용 관문은
-      비대칭이라 '거짓'이 아니라 '모름'이 되고, 경고는 불확실로 남는다(exit 1)
+      같은 파일에 판정자가 '예'를 하고 3행 주석을 인용한 경우. 주석 인용은 받지 않는다. 관문이 받지 않은
+      '예'는 판정에 넣지 않으므로 판정자가 없을 때와 같은 확실한 검토 필요다(AI 확인 필요로 남는다)
     expect:
-      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review-uncertain
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
       kr.ai-basic-act.31/ai-output-without-label: needs-review
     ai:
       ai-prior-notice: {answer: yes, cite: '약관 제7조: 본 서비스는 생성형 인공지능을 기반으로 운용됩니다'}
@@ -232,10 +232,10 @@ cases:
   - file: ai-basic-act-31-1/terms-gate.tsx
     id: terms-gate-fullline-cite
     note: >
-      끝에 주석이 붙은 4행을 통째로 인용한 경우. required 는 주석을 떼고 남은 import 줄이 코드에 있어
+      끝에 주석이 붙은 3행을 통째로 인용한 경우. required 는 주석을 떼고 남은 import 줄이 코드에 있어
       받지만, strict 는 인용을 한 글자도 고치지 않고 주석 없는 코드에서 찾으므로 받지 않는다
     expect:
-      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review-uncertain
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
       kr.ai-basic-act.31/ai-output-without-label: needs-review
     ai:
       ai-prior-notice:

@@ -22,9 +22,9 @@ CLOSED_PROMPT = """아래 코드가 다음 조건에 해당하는지 판정하�
 JSON만 출력한다: {{"answer": "예" 또는 "아니오", "evidence": "<판단 근거가 된 코드 한 줄을 그대로 인용. 해당 없으면 빈 문자열>"}}
 
 코드({lang}):
-```
+{fence}
 {code}
-```"""
+{fence}"""
 
 FRAGMENT_NOTE = {
     "function": """
@@ -38,9 +38,9 @@ FRAGMENT_NOTE = {
 HEADER_BLOCK = """
 
 참고 — 같은 파일에서 위 코드가 쓰는 최상위 선언과 import, 위 함수를 부르는 줄, 위 코드가 읽는 this 필드에 값을 넣는 줄이다. `// …` 는 그 사이를 뺐다는 표시다. **판정 대상이 아니다.** 위 "코드"에 대해 판정하고, 근거도 위 "코드"에서 인용하라.
-```
+{fence}
 {header}
-```"""
+{fence}"""
 
 RawAnswer = Literal["예", "아니오", "해당없음", "?"]
 Failure = Literal["timeout", "isolation", "parse", "transport", "missing"]
@@ -70,12 +70,20 @@ class Question:
     """`code` 가 파일의 일부면 그 종류("function" | "top-level"). 파일 전체면 빈 문자열."""
 
     def prompt(self) -> str:
-        base = CLOSED_PROMPT.format(question=self.text, lang=self.lang, code=self.code.strip())
+        fence = _fence(self.code + self.header)
+        base = CLOSED_PROMPT.format(question=self.text, lang=self.lang, code=self.code.strip(), fence=fence)
         if self.fragment:
             base += FRAGMENT_NOTE[self.fragment]
         if self.header.strip():
-            base += HEADER_BLOCK.format(header=self.header.strip())
+            base += HEADER_BLOCK.format(header=self.header.strip(), fence=fence)
         return base
+
+
+def _fence(text: str) -> str:
+    """코드를 감쌀 울타리. 코드 속 가장 긴 백틱 줄보다 길게 한다. 코드의 ``` 가 블록을 닫으면 그 뒤의 글이 코드가
+    아니라 지시로 읽힌다(끝까지 점검에서 실측: AI 채팅 화면의 마크다운 문자열)."""
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,7 @@ class OncePerRun:
         self._answers: dict[str, Answer] = {}
         self._timeouts = 0
         self.skipped = 0
+        self.sent = 0
 
     def ask(self, q: Question) -> Answer:
         key = hashlib.sha256(q.prompt().encode("utf-8")).hexdigest()
@@ -126,6 +135,7 @@ class OncePerRun:
             a = Answer(raw="?", failure="transport")
         else:
             a = self.inner.ask(q)
+            self.sent += 1
             self._timeouts = self._timeouts + 1 if a.failure == "timeout" else 0
         self._answers[key] = a
         return a

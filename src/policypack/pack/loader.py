@@ -38,8 +38,14 @@ def load_pack(path: str | Path) -> PolicyPack:
         p = p / "pack.yaml"
     if not p.exists():
         raise PackError(f"정책 팩을 찾을 수 없습니다: {p}")
+    if not p.is_file():
+        raise PackError(f"{p}: 파일이 아닙니다")
     try:
         raw = _yaml.load(p.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as e:
+        raise PackError(f"{p}: UTF-8 로 읽지 못했습니다") from e
+    except OSError as e:
+        raise PackError(f"{p}: 읽지 못했습니다 ({e.strerror or e})") from e
     except YAMLError as e:
         raise PackError(f"{p}: YAML 을 읽지 못했습니다\n{e}") from e
     if not isinstance(raw, dict):
@@ -47,7 +53,7 @@ def load_pack(path: str | Path) -> PolicyPack:
     try:
         return PolicyPack.model_validate(raw)
     except ValidationError as e:
-        raise PackError(f"{p}: 정책 팩이 문법에 맞지 않습니다\n{_format_errors(e)}") from e
+        raise PackError(f"{p}: 정책 팩이 문법에 맞지 않습니다\n{format_errors(e)}") from e
 
 
 def pack_digest(path: str | Path) -> str:
@@ -58,7 +64,8 @@ def pack_digest(path: str | Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()[:16]
 
 
-def _format_errors(e: ValidationError) -> str:
+def format_errors(e: ValidationError) -> str:
+    """검증 오류를 '위치: 까닭' 줄로. 팩 파일과 테스트 파일이 같이 쓴다."""
     lines = []
     for err in e.errors():
         loc = " → ".join(str(x) for x in err["loc"] if x != "__root__")
@@ -137,13 +144,26 @@ def check_legal_texts(pack: PolicyPack, base: Path) -> list[str]:
                 out.append(f"{label}: 조문 원문 파일이 없습니다 (추적성 미완)")
                 continue
             f = base / ref.text_file
-            if not f.exists():
+            if not f.is_file():
                 out.append(f"{label}: 원문 파일이 없습니다 — {ref.text_file}")
+                continue
+            if not f.resolve().is_relative_to(base.resolve()):
+                out.append(f"{label}: 원문 파일이 링크를 따라 팩 밖을 가리킵니다 — {ref.text_file}")
                 continue
             if not ref.text_sha256:
                 out.append(f"{label}: text-sha256 이 비어 있습니다 (추적성 미완)")
                 continue
-            actual = hashlib.sha256(f.read_bytes()).hexdigest()
+            try:
+                data = f.read_bytes()
+            except OSError as e:
+                out.append(f"{label}: 원문 파일을 읽지 못했습니다 — {ref.text_file} ({e.strerror or e})")
+                continue
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError:
+                # CP949 로 받은 원문 등. SARIF 에 깨진 글자로 실리지 않게 싣지 않는다
+                out.append(f"{label}: 원문이 UTF-8 이 아니라 SARIF 에 싣지 않습니다 — {ref.text_file}")
+            actual = hashlib.sha256(data).hexdigest()
             if actual != ref.text_sha256:
                 out.append(
                     f"{label}: 원문이 바뀌었습니다. 조문을 다시 확인하고 규칙을 손봐야 합니다\n"

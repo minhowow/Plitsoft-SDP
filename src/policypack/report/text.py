@@ -32,7 +32,8 @@ UNTESTED_WHY = {
     "engine-incomplete": "엔진이 이 파일에서 규칙을 끝내지 못했습니다",
     "no-judge": "AI 에게 물어야 할 곳인데 판정자가 꺼져 있습니다(--judge)",
     "judge-unavailable": "판정자를 부르지 못했습니다",
-    "judge-unparseable": "판정자의 답을 쓸 수 없었습니다(형식 오류·격리 위반)",
+    "judge-unparseable": "판정자의 답을 쓸 수 없었습니다(형식 오류·격리 위반·예/아니오가 아닌 답)",
+    "citation-rejected": "판정자가 '예'라고 했지만 인용을 코드에서 확인하지 못했습니다",
     "weak-unconfirmed": "이름만 본 약한 근거라 AI 확인 없이는 풀지 않았습니다(이 규칙에는 AI 대안이 없습니다)",
     "timeout": "판정자가 시간 안에 답하지 않았습니다",
 }
@@ -90,7 +91,7 @@ def render(result: EvalResult, root: Path | None = None, explain: bool = False, 
         out.extend(_ai_decisions(result, st, root))
 
     out.append("")
-    out.append(_summary(result, findings, st))
+    out.append(_summary(result, findings, st, root))
     return "\n".join(out)
 
 
@@ -117,7 +118,7 @@ def _body(f: Finding, st: Style) -> list[str]:
         why = " · ".join(UNTESTED_WHY.get(r.value, r.value) for r in reasons)
         lines.append(st.soft(f"    다 판정하지 못함  {why}"))
     if f.ai_pending:
-        lines.append(st.soft(f"    AI 확인 필요  {', '.join(f.ai_pending)} — 답을 받지 못했습니다"))
+        lines.append(st.soft(f"    AI 확인 필요  {', '.join(f.ai_pending)} — 판정에 넣지 않았습니다"))
 
     for alt in f.alternatives:
         lines.append(f"    · {alt['message']}")
@@ -134,7 +135,7 @@ def _body(f: Finding, st: Style) -> list[str]:
 def pending_note(result: EvalResult, hint: bool = False) -> str:
     """'AI 확인이 필요한 곳' 한 줄. 약한 근거만으로는 경고를 풀지 않는다는 것도 함께 알린다."""
     if result.judge_id:
-        why = "판정자가 답하지 못했습니다"
+        why = "판정자가 답하지 못했거나 쓸 수 없는 답이었습니다"
     else:
         why = "판정자가 꺼져 있습니다" + (". --judge 로 켜면 AI 가 확인합니다" if hint else "")
     tail = "(이름만 본 약한 근거로는 풀지 않습니다)"
@@ -167,7 +168,7 @@ def _unit_key(u) -> tuple:
     return (u.policy.id, u.rule.id, str(u.target.path.resolve()), region, u.top_level)
 
 
-def _summary(result: EvalResult, findings: list[Finding], st: Style) -> str:
+def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path | None = None) -> str:
     counts: dict[Outcome, int] = {}
     for f in findings:
         counts[f.outcome] = counts.get(f.outcome, 0) + 1
@@ -183,7 +184,10 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style) -> str:
 
     cost = f"{result.engine or '정적'} {result.static_seconds:.1f}초"
     if result.questions_asked:
-        cost += f" · AI 질문 {result.questions_asked}개(답 {result.ai_answered}) {result.ai_seconds:.1f}초"
+        cost += (
+            f" · AI 질문 {result.questions_asked}개(보낸 것 {result.questions_sent}개 · 답 {result.ai_answered}) "
+            f"{result.ai_seconds:.1f}초"
+        )
     else:
         cost += " · AI 0회"
 
@@ -198,14 +202,14 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style) -> str:
     if result.ai_dismissed:
         gaps.append(f"  AI 가 '해당 없음'으로 뺀 판정 {len(result.ai_dismissed)}건 — 인용 없이 빠졌습니다")
     if result.unparsed:
-        names = ", ".join(Path(p).name for p in result.unparsed[:3])
+        names = ", ".join(rel(p, root) for p in result.unparsed[:3])
         more = f" 외 {len(result.unparsed) - 3}개" if len(result.unparsed) > 3 else ""
         gaps.append(
             f"  파싱하지 못한 파일 {len(result.unparsed)}개({names}{more}) — 구문 조건을 확인하지 못해 "
             f"'불확실'로 남았을 수 있습니다"
         )
     if result.incomplete:
-        names = ", ".join(Path(p).name for p in result.incomplete[:3])
+        names = ", ".join(rel(p, root) for p in result.incomplete[:3])
         more = f" 외 {len(result.incomplete) - 3}개" if len(result.incomplete) > 3 else ""
         gaps.append(
             f"  엔진이 규칙을 끝내지 못한 파일 {len(result.incomplete)}개({names}{more}) — 시간 초과·메모리 부족 등. "
@@ -214,7 +218,7 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style) -> str:
     if result.engine_errors:
         gaps.append(f"  엔진 오류 {len(result.engine_errors)}건(어느 파일인지 모름): {result.engine_errors[0][:120]}")
     if result.skipped:
-        names = ", ".join(Path(p).name for p in result.skipped[:3])
+        names = ", ".join(rel(p, root) for p in result.skipped[:3])
         more = f" 외 {len(result.skipped) - 3}개" if len(result.skipped) > 3 else ""
         gaps.append(f"  건너뛴 파일 {len(result.skipped)}개({names}{more}) — {SKIPPED_REASONS}")
     note = st.dim("  이 도구는 법률 자문이 아닙니다. 검토가 필요한 지점을 고를 뿐입니다.")

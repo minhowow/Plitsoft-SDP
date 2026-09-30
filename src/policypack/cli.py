@@ -22,7 +22,7 @@ from pathlib import Path
 from policypack import __version__
 from policypack.defaults import default_pack
 from policypack.discover import Discovery
-from policypack.errors import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, ConfigError, PolicypackError
+from policypack.errors import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, ConfigError, PackError, PolicypackError
 from policypack.pack.loader import (
     check_legal_texts,
     check_review_dates,
@@ -43,10 +43,18 @@ SCHEMAS = {
 }
 
 
+class _Parser(argparse.ArgumentParser):
+    """명령줄 오류도 다른 오류처럼 '오류: …' 로 알리고 2로 끝낸다. argparse 의 영어 문구는 그대로 둔다."""
+
+    def error(self, message: str):
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_ERROR, f"오류: {message}\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="policypack", description="국내 법·정책 관점 코드 검토")
+    p = _Parser(prog="policypack", description="국내 법·정책 관점 코드 검토")
     p.add_argument("--version", action="version", version=f"policypack {__version__}")
-    sub = p.add_subparsers(dest="command", metavar="<명령>")
+    sub = p.add_subparsers(dest="command", metavar="<명령>", parser_class=_Parser)
 
     v = sub.add_parser("validate", help="정책 팩이 문법에 맞는지 보고, 미완인 곳을 드러낸다")
     v.add_argument("pack", nargs="?", default=None, help="기본: 내장 kr-core 팩")
@@ -85,7 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on", default="uncertain", choices=["review", "uncertain", "never"], help="무엇까지를 종료 코드 1로 볼지"
     )
     sc.add_argument("--exit-zero", action="store_true", help="검토할 것이 있어도 0으로 끝낸다")
-    sc.add_argument("--explain", action="store_true", help="판정 경로를 함께 낸다")
+    sc.add_argument("--explain", action="store_true", help="판정 경로를 함께 낸다 (full 은 늘 낸다)")
     sc.add_argument("--no-color", action="store_true")
 
     t = sub.add_parser("test", help="정책 팩의 픽스처로 기대 판정을 확인한다 (모델 호출 0회)")
@@ -216,9 +224,27 @@ def cmd_schema(args) -> int:
 
 
 def cmd_doctor(args) -> int:
-    from policypack.static.semgrep_cli import diagnose
+    from policypack.errors import BackendError
+    from policypack.static.semgrep_cli import diagnose, timeout_from_env
 
     info = diagnose()
+    pack_file, _ = pack_location(default_pack())
+    info["pack"] = str(pack_file)
+    try:
+        load_pack(pack_file)
+    except PackError as e:
+        # 기본 팩을 읽지 못하면 scan·test 가 모두 실패한다. 진단이 먼저 알려야 한다
+        info["notes"].append(f"기본 정책 팩을 읽지 못했습니다: {e}")
+        info["pack_ok"] = False
+    else:
+        info["pack_ok"] = True
+    try:
+        timeout_from_env()
+    except BackendError as e:
+        info["notes"].append(str(e))
+        info["timeout_ok"] = False
+    else:
+        info["timeout_ok"] = True
     if args.json:
         print(json.dumps(info, ensure_ascii=False, indent=2))
     else:
@@ -227,11 +253,12 @@ def cmd_doctor(args) -> int:
         print(f"  버전      : {info['version'] or '-'}")
         print(f"  고른 이유 : {info['source']}")
         print("기본 경로")
-        print(f"  정책 팩   : {default_pack()}")
+        print(f"  정책 팩   : {pack_file}{'' if info['pack_ok'] else ' (읽지 못함)'}")
         if info["notes"]:
             for n in info["notes"]:
                 print(f"  ! {n}")
-    return EXIT_OK if info["path"] else EXIT_ERROR
+    healthy = info["path"] and info["version"] and info["pack_ok"] and info["timeout_ok"]
+    return EXIT_OK if healthy else EXIT_ERROR
 
 
 # ── scan ────────────────────────────────────────────────────────────────────
@@ -276,7 +303,7 @@ def _egress_notice(spec: str, env: dict | None = None) -> str:
         " 얻지 못한 파일과 적용 여부를 AI에 묻는 질문은 파일 전체가, 함수 안팎에 앵커가 섞인 파일의 함수 밖"
         " 판정은 함수 본문을 비운 모듈 최상위 줄이 갑니다.",
     ]
-    routing = [f"{k}={env[k]}" for k in _ROUTING_VARS if env.get(k)]
+    routing = [f"{k}={_redact(env[k])}" for k in _ROUTING_VARS if env.get(k) and not _is_default_route(k, env[k])]
     if routing:
         lines.append(f"      판정자가 따르는 설정 때문에 실제 목적지가 바뀝니다: {', '.join(routing)}")
     telemetry = [k for k in _TELEMETRY_VARS if env.get(k)]
@@ -285,6 +312,30 @@ def _egress_notice(spec: str, env: dict | None = None) -> str:
             f"      텔레메트리 설정({', '.join(telemetry)})이 있어 판정자 CLI 가 그 수집기에도 기록을 보낼 수 있습니다."
         )
     return "\n".join(lines)
+
+
+def _redact(value: str) -> str:
+    """주소에 붙은 계정·토큰(user:pass@, ?key=)은 CI 로그에 남기지 않는다. 목적지(scheme://host:port/path)만 적는다.
+    주소로 읽지 못하면 값을 싣지 않는다 — 알림 한 줄 때문에 검사가 멈추면 안 된다."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "(주소를 읽지 못함)"
+    if not parts.scheme or not parts.netloc:
+        return "(주소를 읽지 못함)" if "@" in value or "?" in value else value
+    return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}{parts.path}"
+
+
+def _is_default_route(key: str, value: str) -> bool:
+    """기본 목적지를 적어 둔 것이면 '목적지가 바뀝니다'가 아니다."""
+    from urllib.parse import urlsplit
+
+    try:
+        return key == "ANTHROPIC_BASE_URL" and urlsplit(value).hostname == "api.anthropic.com"
+    except ValueError:
+        return False
 
 
 def _warn_engine_errors(engine: str, errors: list[str]) -> None:
@@ -302,6 +353,21 @@ def _skip_note(counts: dict[str, int]) -> str:
 
     parts = [f"{SKIP_LABELS[k]} {n}개" for k, n in counts.items() if n and k in SKIP_LABELS]
     return f" ({' · '.join(parts)} 건너뜀)" if parts else ""
+
+
+def _report_root(paths: list[Path]) -> Path:
+    """전체 검사의 보고 경로 기준. 검사한 곳이 git 저장소 안이면 그 루트, 아니면 실행 위치다. 범위 검사처럼 하위
+    폴더에서 돌려도 SARIF uri 와 지문이 같다(전에는 실행 위치 기준이라 같은 경고가 다른 경고가 됐다)."""
+    from policypack import gitscope
+
+    try:
+        start = Path(os.path.commonpath([str(p.resolve()) for p in paths])) if paths else Path.cwd()
+    except ValueError:  # 윈도에서 드라이브가 다르다
+        return Path.cwd()
+    try:
+        return gitscope.repo_root(start if start.is_dir() else start.parent)
+    except ConfigError:
+        return Path.cwd()
 
 
 def _scope_start(paths: list[Path]) -> Path:
@@ -339,7 +405,10 @@ def _select_targets(args, languages: list[str]) -> Selection:
     if missing:
         # CI 에서 경로를 오타내면 "검사할 파일이 없습니다"로 조용히 통과했다
         raise ConfigError(f"경로가 없습니다: {', '.join(map(str, missing))}")
-    if not (args.staged or args.diff):
+    if args.diff is not None and not args.diff.strip():
+        # CI 에서 REF 변수가 비면(--diff "$BASE_REF") 전체 검사로 조용히 바뀌었다
+        raise ConfigError("--diff 의 REF 가 비었습니다 (예: --diff origin/main)")
+    if not args.staged and args.diff is None:
         found = discover(paths or [Path(".")], languages)
         notes = []
         if found.skipped_links:
@@ -363,7 +432,7 @@ def _select_targets(args, languages: list[str]) -> Selection:
                 f"Semgrep 의 정규식 조건이 이런 파일에서 아무것도 찾지 못합니다. UTF-8 로 바꾸면 검사합니다. "
                 f"보지 못한 코드라 '불확실'처럼 종료 코드에 셉니다(--fail-on review 면 세지 않습니다)."
             )
-        return Selection(found=found, note="\n".join(notes))
+        return Selection(found=found, note="\n".join(notes), root=_report_root(paths))
 
     start = _scope_start(paths)
     scope = gitscope.staged(start) if args.staged else gitscope.changed_since(start, args.diff)
@@ -382,8 +451,10 @@ def _select_targets(args, languages: list[str]) -> Selection:
     found.files.sort()
 
     note = f"{scope.label} {len(found.files)}개를 검사합니다{_skip_note(counts)}."
-    if scope.dirty:
-        names = ", ".join(str(p.relative_to(scope.root)) for p in scope.dirty[:3])
+    scanned = set(found.files)
+    dirty = [f for f in scope.dirty if f in scanned]
+    if dirty:
+        names = ", ".join(str(p.relative_to(scope.root)) for p in dirty[:3])
         note += (
             f"\n  주의: 스테이징한 뒤 또 바뀐 파일이 있습니다({names}). 작업 트리를 검사하므로 "
             f"커밋될 내용과 다를 수 있습니다. pre-commit 으로 돌리면 이 문제가 없습니다."
@@ -449,6 +520,7 @@ def cmd_scan(args) -> int:
     # 판정자가 없거나 답하지 못하면 AI 에게 물어야 했던 곳을 보고서가 'AI 확인 필요'로 알린다(요약 줄·JSON·SARIF).
     result = evaluate(pack, targets, static, judge=judge)
     result.skipped = [str(p) for p in found.skipped_files()]
+    result.questions_sent = getattr(judge, "sent", 0)
     if getattr(judge, "skipped", 0):
         print(
             f"주의: 판정자가 연달아 {judge.GIVE_UP_AFTER}번 시간 안에 답하지 않아 남은 질문 {judge.skipped}개는 "
@@ -568,6 +640,10 @@ def main(argv: list[str] | None = None) -> int:
     previous = _sigterm_exits()
     try:
         return _main(argv)
+    except KeyboardInterrupt:
+        # 판정자·semgrep 실행기의 finally 가 이미 정리했다. 파이썬 traceback 대신 한 줄로 알린다
+        print("\n중단했습니다.", file=sys.stderr)
+        return 130
     finally:
         if previous is not None:
             import signal

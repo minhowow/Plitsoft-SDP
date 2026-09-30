@@ -25,6 +25,7 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             "pack_digest": pack_digest,
             "questions_asked": result.questions_asked,
             "ai_answered": result.ai_answered,
+            "questions_sent": result.questions_sent,
             # AI 에게 물어야 했는데 답을 받지 못한 판정 단위 수(판정자 없음 포함)
             "ai_pending": result.ai_pending,
             # AI 의 '예'로 풀린 경고와, 적용 질문의 '아니오'로 빠진 판정. 사람이 검토할 수 있게 낸다

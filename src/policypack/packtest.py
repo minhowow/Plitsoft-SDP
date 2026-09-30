@@ -23,7 +23,7 @@
 
 픽스처에 "판정자가 이렇게 답했다고 치자"를 적는다. 근거 관문은 엔진이 평소처럼
 적용한다. 그래서 스텁도 방향성 신뢰를 우회하지 못한다 — 코드에 없는 줄을 인용한 '예'는
-'모름'이 되어 경고가 남는다. 답을 적지 않은 AI 질문은 판정이 기대와 맞아도 실패다.
+판정에 넣지 않아 경고가 남는다. 답을 적지 않은 AI 질문은 판정이 기대와 맞아도 실패다.
 모델은 부르지 않는다.
 """
 
@@ -44,6 +44,7 @@ from policypack.evaluate.kleene import FALSE, TRUE, or3
 from policypack.evaluate.planner import considered_values, needs_alternative_questions
 from policypack.judge.base import Answer, Question
 from policypack.model import PolicyPack, Predicate, _Base
+from policypack.pack.loader import format_errors
 from policypack.static.backend import PredicateKey
 from policypack.static.compile import GROUP_APPLIES, compile_static
 
@@ -67,8 +68,9 @@ class Expected(str, Enum):
 
 
 class StubAnswer(str, Enum):
-    """스텁 답. unknown 은 판정자가 '모름'이라고 **답한** 것이다(실패가 아니다). 판정에 '모름'으로 들어가 불확실로
-    남는다. 판정자가 실패한 경우는 스텁을 적지 않은 것과 같다 — 판정에 넣지 않고 AI 확인 필요로 남긴다."""
+    """스텁 답. unknown·n/a 는 판정자가 그렇게 **답한** 것이다(실패가 아니다). 대안 질문에서는 판정에 넣지 않고
+    AI 확인 필요로 남는다(판정자가 없을 때와 같다). 적용 질문에서는 적용이 '모름'으로 남는다. 판정자가 실패한
+    경우는 스텁을 적지 않은 것과 같다."""
 
     YES = "yes"
     NO = "no"
@@ -85,12 +87,6 @@ class Stub(_Base):
     answer: StubAnswer
     cite: str | None = None
     """코드 한 줄을 그대로 적는다. 줄 번호는 받지 않는다 — 판정자도 줄 번호가 아니라 글을 인용한다."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _short_form(cls, v):
-        # `ai-guard: no` 처럼 답만 적는 짧은 꼴
-        return {"answer": v} if isinstance(v, str) else v
 
     @model_validator(mode="after")
     def _cite_only_for_yes(self) -> Stub:
@@ -110,7 +106,17 @@ class FixtureCase(_Base):
     expect: Expected | dict[str, Expected]
     """판정 하나(파일 맨 위 rule 에 대한 것)이거나 {'정책/규칙': 판정}."""
     ai: dict[str, Stub] = Field(default_factory=dict)
-    """키는 기대한 규칙의 AI 조건 id, 또는 적용 질문이면 'applies-ai'."""
+    """키는 기대한 규칙의 AI 조건 id, 또는 적용 질문이면 'applies-ai'. 값은 답만(`no`) 적거나 {answer, cite} 다."""
+
+    @field_validator("ai", mode="before", json_schema_input_type=dict[str, StubAnswer | Stub])
+    @classmethod
+    def _short_form(cls, v):
+        # `ai-guard: no` 처럼 답만 적는 짧은 꼴. 여기서 풀어야 스키마에도 드러난다 — Stub 의 before 검사기로 풀면
+        # 스키마가 객체만 받아, 편집기가 kr-core 의 테스트 파일마다 오류를 냈다(끝까지 점검에서 실측)
+        if isinstance(v, dict):
+            return {k: {"answer": x} if isinstance(x, str) else x for k, x in v.items()}
+        return v
+
     decoy_for: list[str] = Field(default_factory=list)
     """이 픽스처가 흉내 내는 정적 대안 id('정책/규칙/대안' 꼴도 된다). 대안과 비슷한 모양이지만 그 대안으로
     풀리면 안 된다 — 그 규칙의 기대는 경고여야 한다. `--strict` 는 혼자 풀 수 있는 정적 대안마다 이런
@@ -119,7 +125,7 @@ class FixtureCase(_Base):
 
 
 class PolicyTestFile(_Base):
-    api_version: str = Field(alias="apiVersion")
+    api_version: str = Field(alias="apiVersion", json_schema_extra={"const": TEST_API})
     rule: str | None = None
     """'정책/규칙'. expect 가 판정 하나인 케이스가 있으면 반드시 적는다."""
     cases: list[FixtureCase] = Field(min_length=1)
@@ -185,7 +191,7 @@ def load_test_file(p: Path, pack: PolicyPack, root: Path) -> list[Fixture]:
     try:
         tf = PolicyTestFile.model_validate(_read_yaml(p))
     except ValidationError as e:
-        raise PackError(f"{p}: 테스트 파일이 문법에 맞지 않습니다\n{e}") from e
+        raise PackError(f"{p}: 테스트 파일이 문법에 맞지 않습니다\n{format_errors(e)}") from e
     rules = {f"{pol.id}/{r.id}": r for pol, r in pack.iter_rules()}
     out = []
     for c in tf.cases:

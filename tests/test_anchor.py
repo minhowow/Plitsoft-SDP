@@ -160,8 +160,10 @@ def test_ai_citation_outside_the_region_cannot_clear(tmp_path, kr):
 
     res = evaluate(pack, [Target(path=f, lang="typescript", case="ads")], static, judge=CitesTheOtherGuard())
     ads = [x for x in res.findings if x.rule == "ad-send-without-night-guard"]
-    assert [(x.region, x.outcome.value) for x in ads] == [((7, 10), "needs-review-uncertain")]
+    # 관문이 받지 않은 '예'는 판정에 넣지 않는다. 판정자가 없을 때와 같은 확실한 경고이고 까닭을 남긴다
+    assert [(x.region, x.outcome.value) for x in ads] == [((7, 10), "needs-review")]
     assert any("판정 구역 밖" in t for t in ads[0].trace)
+    assert "citation-rejected" in [r.value for r in ads[0].untested_reasons]
 
 
 def test_questions_are_asked_per_region(probes):
@@ -237,7 +239,7 @@ def test_a_header_citation_cannot_clear(tmp_path, kr):
     judge = FakeJudge("예", evidence="const OPEN_HOUR = 9;")
     res = evaluate(pack, [Target(path=f, lang="typescript")], static, judge=judge)
     ads = [x for x in res.findings if x.rule == "ad-send-without-night-guard"]
-    assert ads and all(x.outcome.value == "needs-review-uncertain" for x in ads)
+    assert ads and all(x.outcome.value == "needs-review" for x in ads)
     assert all(any("판정 구역 밖" in t for t in x.trace) for x in ads)
 
 

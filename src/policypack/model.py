@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import datetime as _dt
 from enum import Enum
+from pathlib import PurePosixPath as _PurePosixPath
+from pathlib import PureWindowsPath as _PureWindowsPath
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -30,9 +32,12 @@ def _kebab(name: str) -> str:
 
 
 class _Base(BaseModel):
+    # 팩 파일의 키는 케밥(compliant-if-any)만 받는다. 파이썬 이름(compliant_if_any)도 받으면 CLI 는 통과하고
+    # 편집기(스키마)는 거절해 둘이 어긋났다(끝까지 점검에서 실측)
     model_config = ConfigDict(
         alias_generator=_kebab,
-        populate_by_name=True,
+        validate_by_name=False,
+        validate_by_alias=True,
         extra="forbid",
         str_strip_whitespace=True,
     )
@@ -56,7 +61,7 @@ class Strength(str, Enum):
 class Evidence(str, Enum):
     """AI 대안의 '예'를 인정하는 조건. 어느 쪽이든 코드에 실제로 있는 줄을 인용해야 한다.
 
-    인용이 틀리면 '거짓'이 아니라 '모름'이 되어 경고가 남는다 — 인용 관문의 비대칭.
+    관문이 받지 않은 '예'는 '거짓'이 되지 않고 판정에서 빠져(판정자가 없을 때처럼) 경고가 남는다 — 인용 관문의 비대칭.
     required  주석만 인용한 '예'는 받지 않는다. 코드 줄 끝에 붙은 주석은 떼고 본다
     strict    인용을 한 글자도 고치지 않고 주석을 뗀 코드에서 찾는다. 끝에 주석이 붙은 줄을 통째로
               인용해도 받지 않는다. '이 문구가 코드에 실제로 있는가'를 묻는 대안에 쓴다
@@ -174,6 +179,9 @@ class Condition(_Base):
 class Predicate(_Base):
     """적법한 대안 하나(compliant-if-any 의 항목). static 과 ai 중 정확히 하나를 적는다."""
 
+    # 아래 검사기의 규칙을 스키마에도 적는다. 편집기가 CLI 와 같은 것을 거절하게 한다
+    model_config = ConfigDict(json_schema_extra={"oneOf": [{"required": ["static"]}, {"required": ["ai"]}]})
+
     id: str
     strength: Strength = Strength.STRONG
     static: dict[str, Any] | None = None
@@ -212,6 +220,9 @@ class AppliesAi(_Base):
 
 
 class Rule(_Base):
+    # 대안이 없는 규칙은 아래 검사기가 거절한다. 스키마에서도 빠진 키를 알리게 required 에 넣는다
+    model_config = ConfigDict(json_schema_extra=lambda s: s.setdefault("required", []).append("compliant-if-any"))
+
     id: str
     languages: list[str] | None = None
     scope: Scope = Scope.FILE
@@ -219,7 +230,7 @@ class Rule(_Base):
     """scope: anchor 에서 판정 위치를 낼 applies-when 조건 id."""
     applies_when: list[Condition] = Field(default_factory=list)
     applies_ai: AppliesAi | None = None
-    compliant_if_any: list[Predicate] = Field(default_factory=list)
+    compliant_if_any: list[Predicate] = Field(default_factory=list, json_schema_extra={"minItems": 1})
 
     @model_validator(mode="after")
     def _check(self) -> Rule:
@@ -287,6 +298,13 @@ class LegalRef(_Base):
     def _check(self) -> LegalRef:
         if self.text_sha256 and not self.text_file:
             raise ValueError(f"{self.statute} {self.article}: text-sha256 이 있는데 text-file 이 없습니다")
+        if self.text_file:
+            # 팩 밖의 파일을 가리키면 SARIF 가 그 내용을 조문으로 싣는다(끝까지 점검에서 실측: ../ 로 팩 밖의 파일)
+            posix, win = _PurePosixPath(self.text_file.replace("\\", "/")), _PureWindowsPath(self.text_file)
+            if posix.is_absolute() or win.is_absolute() or win.drive or ".." in posix.parts:
+                raise ValueError(
+                    f"{self.statute} {self.article}: text-file 은 팩 폴더 안의 상대 경로여야 합니다 — {self.text_file}"
+                )
         return self
 
 
@@ -337,7 +355,7 @@ class PackMeta(_Base):
 
 
 class PolicyPack(_Base):
-    api_version: str = Field(alias="apiVersion")
+    api_version: str = Field(alias="apiVersion", json_schema_extra={"const": API_VERSION})
     pack: PackMeta
     defaults: Defaults = Field(default_factory=Defaults)
     policies: list[Policy] = Field(min_length=1)

@@ -69,7 +69,7 @@
       "type": "object"
     },
     "Evidence": {
-      "description": "AI 대안의 '예'를 인정하는 조건. 어느 쪽이든 코드에 실제로 있는 줄을 인용해야 한다.\n\n인용이 틀리면 '거짓'이 아니라 '모름'이 되어 경고가 남는다 — 인용 관문의 비대칭.\nrequired  주석만 인용한 '예'는 받지 않는다. 코드 줄 끝에 붙은 주석은 떼고 본다\nstrict    인용을 한 글자도 고치지 않고 주석을 뗀 코드에서 찾는다. 끝에 주석이 붙은 줄을 통째로\n          인용해도 받지 않는다. '이 문구가 코드에 실제로 있는가'를 묻는 대안에 쓴다",
+      "description": "AI 대안의 '예'를 인정하는 조건. 어느 쪽이든 코드에 실제로 있는 줄을 인용해야 한다.\n\n관문이 받지 않은 '예'는 '거짓'이 되지 않고 판정에서 빠져(판정자가 없을 때처럼) 경고가 남는다 — 인용 관문의 비대칭.\nrequired  주석만 인용한 '예'는 받지 않는다. 코드 줄 끝에 붙은 주석은 떼고 본다\nstrict    인용을 한 글자도 고치지 않고 주석을 뗀 코드에서 찾는다. 끝에 주석이 붙은 줄을 통째로\n          인용해도 받지 않는다. '이 문구가 코드에 실제로 있는가'를 묻는 대안에 쓴다",
       "enum": [
         "required",
         "strict"
@@ -340,6 +340,18 @@
     "Predicate": {
       "additionalProperties": false,
       "description": "적법한 대안 하나(compliant-if-any 의 항목). static 과 ai 중 정확히 하나를 적는다.",
+      "oneOf": [
+        {
+          "required": [
+            "static"
+          ]
+        },
+        {
+          "required": [
+            "ai"
+          ]
+        }
+      ],
       "properties": {
         "ai": {
           "anyOf": [
@@ -475,6 +487,7 @@
           "items": {
             "$ref": "#/$defs/Predicate"
           },
+          "minItems": 1,
           "title": "Compliant-If-Any",
           "type": "array"
         },
@@ -503,7 +516,8 @@
         }
       },
       "required": [
-        "id"
+        "id",
+        "compliant-if-any"
       ],
       "title": "Rule",
       "type": "object"
@@ -531,6 +545,7 @@
   "additionalProperties": false,
   "properties": {
     "apiVersion": {
+      "const": "policypack/v0.3",
       "title": "Apiversion",
       "type": "string"
     },

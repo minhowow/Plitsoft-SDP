@@ -6,6 +6,8 @@ GitHub 코드 스캐닝은 SARIF 의 uri 를 저장소 루트 기준으로 읽�
 - root 아래면 root 기준 상대 경로. `/tmp` 와 `/private/tmp` 처럼 링크로 갈리는 경우를
   위해 한 번 더 resolve 해서 본다.
 - root 밖이면 `../` 로 시작하는 상대 경로. 절대 경로를 그대로 내지 않는다.
+- 상대 경로는 실행 위치 기준으로 읽는다. root 가 저장소 루트이고 하위 폴더에서 돌리면 `clean.ts` 가 아니라
+  `src/clean.ts` 다.
 - 구분자는 늘 `/`.
 """
 
@@ -17,8 +19,9 @@ from pathlib import Path
 
 def rel(path_str: str | Path, root: Path | None) -> str:
     p = Path(path_str)
-    if root is None or not p.is_absolute():
+    if root is None:
         return p.as_posix()
+    p = Path(os.path.abspath(p))  # 실행 위치 기준으로 읽고 `..` 를 푼다. 같은 파일이 쓰기에 따라 다른 uri 가 되지 않게
     if p.is_relative_to(root):
         return p.relative_to(root).as_posix()
     rp, rr = p.parent.resolve() / p.name, root.resolve()

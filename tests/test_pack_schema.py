@@ -370,3 +370,117 @@ def test_schema_write_removes_only_our_stale_files(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "SCHEMA_DIR", schemas)
     assert cli.main(["schema", "--write"]) == 0
     assert sorted(p.name for p in schemas.glob("*.json")) == ["other.json", *sorted(cli.SCHEMAS)]
+
+
+@pytest.mark.parametrize("text_file", ["../outside.txt", "/etc/hosts", "_legal/../../x.txt", "C:\\law.txt"])
+def test_a_statute_text_must_live_inside_the_pack(tmp_path, text_file):
+    """text-file 이 팩 밖을 가리키면 SARIF 가 그 파일 내용을 조문으로 실었다(끝까지 점검에서 실측)."""
+    bad = MINIMAL.replace(
+        "    rules:\n",
+        "    legal:\n      violated-when-failed:\n"
+        f"        - {{statute: 법, article: 제1조, text-file: '{text_file}'}}\n"
+        "    rules:\n",
+        1,
+    )
+    with pytest.raises(PackError, match="팩 폴더 안의 상대 경로"):
+        load_pack(_write(tmp_path, bad))
+
+
+def test_a_changed_statute_text_is_not_embedded_in_sarif(tmp_path):
+    """해시가 다르면 팩이 말하는 조문이 아니다. validate 가 알리고, SARIF 는 싣지 않는다."""
+    import shutil
+
+    from policypack.report.sarif import _statute_text
+
+    copy = tmp_path / "kr-core"
+    shutil.copytree(KR_CORE, copy, ignore=shutil.ignore_patterns("tests"))
+    ref = load_pack(copy).policies[0].legal.violated_when_failed[0]
+    assert "제22조의2" in _statute_text(ref, copy)
+    (copy / ref.text_file).write_text("다른 글\n", encoding="utf-8")
+    assert _statute_text(ref, copy) == ""
+
+
+def test_pack_keys_are_kebab_case_only(tmp_path):
+    """파이썬 이름(compliant_if_any)도 받으면 CLI 는 통과하고 편집기(스키마)는 거절해 둘이 어긋났다."""
+    with pytest.raises(PackError):
+        load_pack(_write(tmp_path, MINIMAL.replace("compliant-if-any", "compliant_if_any")))
+
+
+def test_the_committed_schemas_accept_what_kr_core_writes():
+    """편집기는 커밋한 스키마로 검사한다. kr-core 의 테스트 파일은 모두 `ai: {ai-guard: no}` 줄임 꼴을 쓰는데
+    테스트 스키마가 객체만 받아 파일마다 오류를 냈다(끝까지 점검에서 실측)."""
+    import datetime
+    import json
+
+    jsonschema = pytest.importorskip("jsonschema")
+    from ruamel.yaml import YAML
+
+    def plain(x):  # YAML 이 날짜로 읽은 값. 편집기는 글자로 본다
+        if isinstance(x, dict):
+            return {k: plain(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [plain(v) for v in x]
+        return x.isoformat() if isinstance(x, datetime.date) else x
+
+    y = YAML(typ="safe", pure=True)
+    pairs = [("policy-pack-0.3.json", KR_CORE / "pack.yaml")] + [
+        ("policy-test-0.1.json", f) for f in sorted((KR_CORE / "tests").glob("*.test.yaml"))
+    ]
+    for schema_name, f in pairs:
+        schema = json.loads((REPO / "schemas" / schema_name).read_text(encoding="utf-8"))
+        doc = plain(y.load(f.read_text(encoding="utf-8")))
+        errors = list(jsonschema.Draft202012Validator(schema).iter_errors(doc))
+        assert errors == [], f"{f.name}: {errors[0].message if errors else ''}"
+
+
+def test_a_pack_file_that_cannot_be_read_is_a_clear_error(tmp_path, capsys):
+    """UTF-8 이 아니거나 폴더인 pack.yaml 은 traceback 이 아니라 오류 한 줄이다."""
+    from policypack.cli import main
+
+    (tmp_path / "pack.yaml").write_bytes("# 한국어\n".encode("euc-kr") + MINIMAL.encode())
+    assert main(["validate", str(tmp_path)]) == 2
+    assert "UTF-8 로 읽지 못했습니다" in capsys.readouterr().err
+    (tmp_path / "pack.yaml").unlink()
+    (tmp_path / "pack.yaml").mkdir()
+    assert main(["validate", str(tmp_path)]) == 2
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_doctor_fails_when_the_default_pack_is_broken(tmp_path, monkeypatch, capsys):
+    """기본 팩을 읽지 못하면 scan·test 가 모두 실패한다. doctor 가 먼저 알린다."""
+    import json
+
+    from policypack.cli import main
+
+    monkeypatch.setenv("POLICYPACK_PACK", str(tmp_path / "missing"))
+    assert main(["doctor", "--json"]) == 2
+    info = json.loads(capsys.readouterr().out)
+    assert info["pack_ok"] is False and any("정책 팩" in n for n in info["notes"])
+
+
+def test_validate_warns_about_statute_texts_it_cannot_use(tmp_path, capsys):
+    """폴더를 가리키거나 UTF-8 이 아닌 원문은 traceback 이나 깨진 SARIF 가 아니라 경고다."""
+    import hashlib
+    import shutil
+
+    from policypack.cli import main
+
+    copy = tmp_path / "kr-core"
+    shutil.copytree(KR_CORE, copy, ignore=shutil.ignore_patterns("tests"))
+    target = copy / "_legal" / "pipa-22-2.txt"
+    old = hashlib.sha256(target.read_bytes()).hexdigest()
+    data = target.read_text(encoding="utf-8").encode("cp949", errors="replace")
+    target.write_bytes(data)
+    text = (copy / "pack.yaml").read_text(encoding="utf-8")
+    assert old in text
+    (copy / "pack.yaml").write_text(text.replace(old, hashlib.sha256(data).hexdigest()), encoding="utf-8")
+    assert main(["validate", str(copy)]) == 0
+    assert "UTF-8 이 아니라 SARIF 에 싣지 않습니다" in capsys.readouterr().out
+
+
+def test_doctor_fails_on_a_bad_timeout_setting(monkeypatch, capsys):
+    from policypack.cli import main
+
+    monkeypatch.setenv("POLICYPACK_SEMGREP_TIMEOUT", "abc")
+    assert main(["doctor"]) == 2
+    assert "POLICYPACK_SEMGREP_TIMEOUT" in capsys.readouterr().out

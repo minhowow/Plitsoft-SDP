@@ -18,6 +18,7 @@ GitHub·GitLab 코드 스캐닝이 `help.markdown` 을 그대로 보여 주므�
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -32,7 +33,6 @@ from policypack.report.outcome import Finding, Outcome
 from policypack.report.paths import rel
 
 SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
-INFO_URI = "https://github.com/policypack/policypack"
 
 LEVEL = {
     Outcome.NEEDS_REVIEW: "warning",
@@ -71,11 +71,22 @@ def _legal_markdown(policy: Policy, base: Path) -> str:
 
 
 def _statute_text(ref: LegalRef, base: Path) -> str:
+    """팩 안의, 기록된 해시와 같은 원문만 싣는다. 해시가 다르면 팩이 말하는 조문이 아니다(validate 가 알린다).
+    해시를 아직 적지 않은 원문은 싣는다."""
     if not ref.text_file:
         return ""
+    f = base / ref.text_file
     try:
-        return (base / ref.text_file).read_text(encoding="utf-8")
+        if not f.resolve().is_relative_to(base.resolve()):
+            return ""
+        data = f.read_bytes()
     except OSError:
+        return ""
+    if ref.text_sha256 and hashlib.sha256(data).hexdigest() != ref.text_sha256:
+        return ""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:  # validate 가 알린다
         return ""
 
 
@@ -123,7 +134,6 @@ def build(
                     "driver": {
                         "name": "policypack",
                         "version": __version__,
-                        "informationUri": INFO_URI,
                         "rules": rules,
                     },
                     # 정적 조건을 돌린 엔진. 엔진이나 판이 바뀌면 결과가 달라질 수 있다
@@ -138,6 +148,7 @@ def build(
                             "judge": result.judge_id or "none",
                             "aiQuestions": result.questions_asked,
                             "aiAnswered": result.ai_answered,
+                            "aiQuestionsSent": result.questions_sent,
                             "aiPending": result.ai_pending,
                             # AI 가 푼 경고와 적용 질문으로 뺀 판정. 결과(results)로 내지 않는다 — 경고가 아니다
                             "aiCleared": [cleared_record(c, lambda p: _uri(p, root)) for c in result.ai_cleared],
@@ -163,12 +174,13 @@ def _policy_rule(ref: str, rule_id: str, policy: Policy, pack_base: Path) -> dic
         "id": ref,
         "name": rule_id.replace("-", " ").title().replace(" ", ""),
         "shortDescription": {"text": policy.title},
-        "fullDescription": {"text": (policy.rationale.implementation if policy.rationale else policy.title)},
+        "fullDescription": {"text": (policy.rationale and policy.rationale.implementation) or policy.title},
         "help": {
             "text": policy.ask_developer or policy.title,
             "markdown": _legal_markdown(policy, pack_base),
         },
-        "helpUri": _help_uri(policy),
+        # 조문 주소가 있을 때만 싣는다. 우리가 갖지 않은 저장소 주소를 대신 넣지 않는다
+        **({"helpUri": u} if (u := _help_uri(policy)) else {}),
         "defaultConfiguration": {"level": "warning"},
         "properties": {"tags": _tags(policy), "precision": "medium"},
     }
@@ -208,10 +220,10 @@ def _gaps(result: EvalResult, root: Path | None) -> list[dict]:
     return out
 
 
-def _help_uri(policy: Policy) -> str:
+def _help_uri(policy: Policy) -> str | None:
     if policy.legal and policy.legal.violated_when_failed:
-        return policy.legal.violated_when_failed[0].url or INFO_URI
-    return INFO_URI
+        return policy.legal.violated_when_failed[0].url
+    return None
 
 
 def _result(f: Finding, rule_index: int, root: Path | None, fp: str) -> dict:

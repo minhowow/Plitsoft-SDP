@@ -127,7 +127,7 @@ def test_strict_evidence_refuses_a_citation_that_carries_a_comment(tmp_path):
             ]
         }
     )
-    assert outcome(strict) == "needs-review-uncertain"
+    assert outcome(strict) == "needs-review", "strict 가 받지 않은 '예'는 판정에 넣지 않는다(판정자 없음과 같다)"
 
 
 # ── 배포 경계 ───────────────────────────────────────────────────────────────

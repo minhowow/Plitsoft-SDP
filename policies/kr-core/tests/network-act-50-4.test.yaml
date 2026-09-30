@@ -117,9 +117,9 @@ cases:
       도 줄 전체가 주석인 인용은 받지 않는다). strict 를 못 박는 것은 아래 twilio-trailing-todo 다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
-      # 인용이 코드에 없으니 '예'는 '모름'이 된다. 경고는 풀리지 않고 불확실로 남는다
-      kr.network-act.50-4/nonemail-start-block: needs-review-uncertain
-      kr.network-act.50-4/nonemail-end-optout: needs-review-uncertain
+      # 관문이 받지 않은 '예'는 판정에 넣지 않는다. 판정자가 없을 때와 같은 확실한 검토 필요다
+      kr.network-act.50-4/nonemail-start-block: needs-review
+      kr.network-act.50-4/nonemail-end-optout: needs-review
     ai:
       ai-night-guard: no
       ai-start-block:
@@ -137,8 +137,8 @@ cases:
       required 로 되돌리면 이 case 가 '준수'로 바뀌어 실패한다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
-      kr.network-act.50-4/nonemail-start-block: needs-review-uncertain
-      kr.network-act.50-4/nonemail-end-optout: needs-review-uncertain
+      kr.network-act.50-4/nonemail-start-block: needs-review
+      kr.network-act.50-4/nonemail-end-optout: needs-review
     ai:
       ai-night-guard: no
       ai-start-block:
