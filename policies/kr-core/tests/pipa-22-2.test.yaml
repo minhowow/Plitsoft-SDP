@@ -54,3 +54,8 @@ cases:
   - file: pipa-22-2/cache-header-and-join.ts
     note: Cache-Control 의 max-age 와 배열 .join() 은 가입·나이 신호가 아니다
     expect: not-applicable
+  - file: pipa-22-2/lock-file-age.ts
+    note: >
+      잠금 파일의 나이(const age = Date.now() - mtime), path 의 join, registerCleanup. 파일 전체의 낱말을 보던 적용
+      조건이 가입 코드로 읽었다(dev 평가 2026-09-30)
+    expect: not-applicable

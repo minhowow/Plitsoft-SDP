@@ -16,7 +16,7 @@ from policypack.static.semgrep_cli import SemgrepBackend
 
 REPO = Path(__file__).resolve().parents[1]
 CASE = "policies/kr-core/tests/pipa-22-2/violating.ts"
-PREDICATE = "signup-context"  # 정규식 조건이다(파싱과 무관 → generic 사본이 있다)
+PREDICATE = "birth-or-age"  # 정규식 조건이다(파싱과 무관 → generic 사본이 있다)
 
 
 @pytest.fixture(autouse=True)

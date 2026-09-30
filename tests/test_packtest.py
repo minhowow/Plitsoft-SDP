@@ -121,7 +121,7 @@ def test_unanswered_question_fails_even_if_the_outcome_matches(tmp_path):
 def test_undeclared_rule_that_fires_is_a_failure(tmp_path):
     """semgrep --test 와 같다. 적지 않은 규칙이 걸리면 다른 정책의 오탐이다."""
     (tmp_path / "page.tsx").write_text(
-        "export default function Signup() {\n  const aiTip = useAssistant();\n"
+        "export default function Signup() {\n  const aiTip = useAiTip();\n"
         '  return (<form><input name="birthDate" /><p>{aiTip}</p></form>);\n}\n',
         encoding="utf-8",
     )

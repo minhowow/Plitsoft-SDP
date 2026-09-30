@@ -24,9 +24,10 @@ cases:
   # 같은 화면에 '생성형 AI' 문구가 있어도 약한 문구 대안이라 판정자가 결과물 표시를 확인해야 풀린다
   # (ai-basic-act-31-1/ai-course-page.tsx)
   - file: ai-basic-act-31/ai-course-page-nolabel.tsx
-    note: AI 를 부르지 않는 강의 소개. 표시 문구까지 없으면 이름만으로 검토 필요가 된다
-    expect: needs-review
-    ai: {ai-label: no, ai-machine-mark: no}
+    note: >
+      AI 를 부르지 않는 강의 소개. 적용 조건이 이름(AiCoursePage)을 보던 때는 검토 필요가 됐다. 이제 코드 모양
+      (SDK·생성 호출·AI 엔드포인트·AI 이름의 훅과 컴포넌트 사용)을 보므로 해당 없음이다
+    expect: not-applicable
 
   # 시행령 제23조 제2항 제2호: 기계 판독 표시 + 1회 이상 안내
   - file: ai-basic-act-31/ai-machine-mark.tsx
@@ -59,3 +60,14 @@ cases:
   - file: ai-basic-act-31/airplane-and-font.tsx
     note: Airplane·aim 과 글꼴 이름 Assistant 는 AI 신호가 아니다
     expect: not-applicable
+  - file: ai-basic-act-31/icon-names.tsx
+    note: >
+      react-icons/ai 는 이름이 Ai 로 시작하는 아이콘(AiOutlineUser)을 내보낸다. 낱말 모양으로 AI 를 찾던 적용 조건이
+      내비게이션 막대를 AI 결과물 화면으로 읽었다(dev 평가 2026-09-30)
+    expect: not-applicable
+  - file: ai-basic-act-31/rag-chat-panel.tsx
+    note: >
+      사내 문서 RAG 답을 채팅으로 보여 준다. SDK 는 다른 파일에 있고 이 파일에는 RAG 이름의 훅과 발화자
+      'assistant' 메시지만 있다. 표시가 없으니 검토 필요(dev 평가 2026-09-30 에서 놓친 모양)
+    expect: needs-review
+    ai: {ai-label: no, ai-machine-mark: no}

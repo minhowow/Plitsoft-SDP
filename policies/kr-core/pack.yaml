@@ -43,16 +43,30 @@ policies:
     rules:
       - id: signup-without-guard
         applies-when:
-          # join 은 메서드 호출을 뺀다. `locales.join("|")`·`err.path.join(".")` 같은 배열 결합은 가입 신호가 아니다.
-          # 'Join now'·joinWaitlist 처럼 앞에 점이 없는 쪽은 그대로 센다.
+          # 가입 맥락. 파일 전체의 낱말(register·join)이 아니라 가입을 가리키는 코드 모양을 본다: 가입 문구, 가입
+          # 경로 문자열, 가입 이름의 함수 정의·호출. path.join·registerCleanup·react-hook-form 의 register() 는 세지
+          # 않는다(dev 평가 2026-09-30: CLI 도구의 잠금 파일·경로 코드가 가입으로 읽혔다).
           - id: signup-context
             static:
-              pattern-regex: (?i)\b(sign_?up\w*|register\w*|(?<!\.)join\w*)\b|회원가입
-          # age 는 앞에 하이픈이 오면 뺀다. HTTP `Cache-Control: max-age=31536000` 과 `s-maxage` 는
-          # 나이 신호가 아니다. `age: number`·`userAge` 처럼 진짜 나이 필드는 그대로 센다.
+              pattern-either:
+                - pattern-regex: 회원\s*가입
+                - pattern-regex: (?i)["'`]/?(?:[\w-]+/)*(sign-?up|register|join)(/[^"'`\n]*)?["'`]
+                - patterns:
+                    - pattern-either:
+                        - pattern: function $F(...) { ... }
+                        - pattern: const $F = $E
+                        - pattern: $F(...)
+                        - pattern: $O.$F(...)
+                    - metavariable-regex:
+                        metavariable: $F
+                        regex: (?i)^\w*(sign_?up|register_?(user|member|account)|join_?(member|us|form))\w*$
+          # 생년월일·나이를 받는가. 필드로 받는 모양만 본다: 필드 선언(age:, birthDate?:), 필드 이름 문자열("birth"),
+          # 멤버 접근(user.age), 한국어 문구. 지역 변수(const age = Date.now() - mtime)와 HTTP max-age 는 세지 않는다.
+          # 정규식만 쓴다 — 파싱이 일부 실패한 파일에서도 이 조건의 '거짓'을 믿을 수 있어야 가입과 무관한 파일이
+          # '불확실'로 남지 않는다(dev 평가 2026-09-30).
           - id: birth-or-age
             static:
-              pattern-regex: (?i)\b(birth\w*|(?<!-)age)\b
+              pattern-regex: (?i)생년월일|만\s*1[34]\s*세|(?<![-\w.])(birth\w*|age|dob|date_?of_?birth)\??\s*:\s*\S|["'](birth\w*|age|dob|dateOfBirth)["']|\.(birth\w*|age|dob|dateOfBirth)\b
 
         applies-ai:
           question: 이 코드는 생년월일이나 나이를 받아 회원 가입을 처리하는가?
@@ -549,8 +563,79 @@ policies:
           #   - 남은 알려진 오탐: AiCoursePage 처럼 Ai+대문자인 이름(AI 를 부르지 않는 강의 소개)은
           #     그대로 걸린다. 경고를 올리는 쪽이라 그대로 둔다. 픽스처 ai-course-page-nolabel.tsx
           - id: ai-source
+            # 이 파일이 생성형 AI 를 쓰거나 그 결과를 받는가. 글자 모양이 아니라 코드 모양으로 본다: 생성 전용 AI SDK 를
+            # 가져오거나, 생성 호출을 하거나, AI·모델 엔드포인트를 부르거나, 이름이 AI 인 훅·함수·컴포넌트를 부르거나
+            # 그린다. openai 를 가져오기만 하는 것은 세지 않는다 — 임베딩·검열에도 쓴다(생성 호출 모양으로 센다).
+            # 컴포넌트 자신의 이름(AiCoursePage)도 세지 않는다 — AI 를 가르치는 강의 소개 화면이 걸렸다.
+            # 낱말 모양 정규식(\bAi[A-Z]\w*)은 아이콘 묶음의 AiOutlineUser 같은 이름에도 걸렸다(dev 평가 2026-09-30).
+            # react-icons/ai 는 이름이 Ai 로 시작하는 아이콘을 내보내는 널리 쓰는 묶음이라 뺀다.
             static:
-              pattern-regex: (?i)((?-i:\b(?:ai|Ai|AI)[A-Z_]\w*|\bassistant\b|\bAssistant[A-Z]\w*)|/api/ai/|\bllm\b|generate(image|text|content)\b|\bgpt\b|@ai-sdk/|\bfrom\s+["']ai(/[\w-]+)?["']|\brequire\(\s*["']ai["']\s*\)|@anthropic-ai/|@google/(genai|generative-ai)\b|@langchain/|client-bedrock-runtime|\.chat\.completions\.|\.images\.(generate|edit)\(|/api/(chat|generate)\b(?!-))
+              pattern-either:
+                - patterns:
+                    - pattern-either:
+                        - pattern: import $X from "$M"
+                        - pattern: import { ... } from "$M"
+                        - pattern: import * as $X from "$M"
+                        - pattern: require("$M")
+                    - metavariable-regex:
+                        metavariable: $M
+                        regex: ^(ai(/[\w-]+)?|@ai-sdk/[\w-]+|@anthropic-ai/[\w-]+|@google/(genai|generative-ai)|@langchain/[\w-]+|langchain(/.*)?|@aws-sdk/client-bedrock-runtime|@mistralai/[\w-]+)$
+                # 생성 호출 가운데 AI 에만 있는 모양. messages.create·responses.create 는 문자(twilio)·설문 SDK 에도
+                # 있어 넣지 않는다
+                - pattern-either:
+                    - pattern: $C.chat.completions.create(...)
+                    - pattern: $C.chat.completions.stream(...)
+                    - pattern: $C.models.generateContent(...)
+                    - pattern: $C.models.generateContentStream(...)
+                # 모양이 겹치는 호출(images.generate 등)은 부르는 객체가 AI 클라이언트일 때만
+                - patterns:
+                    - pattern-either:
+                        - pattern: $C.images.generate(...)
+                        - pattern: $C.images.edit(...)
+                        - pattern: $C.responses.create(...)
+                        - pattern: $C.messages.create(...)
+                    - metavariable-regex:
+                        metavariable: $C
+                        regex: (?i)^(\w+\.)*(openai|anthropic|claude|genai|gemini|llm|ai)(client)?$
+                # 이 저장소 안의 AI 도우미 모듈(@/lib/openai, ./ai)을 가져온다
+                - patterns:
+                    - pattern-either:
+                        - pattern: import $X from "$M"
+                        - pattern: import { ... } from "$M"
+                    - metavariable-regex:
+                        metavariable: $M
+                        regex: (?i)^(\.{1,2}|[@~#])(/[\w.-]+)*/(ai|llm|genai|openai|gpt|gemini|claude|anthropic)$
+                # 템플릿 문자열(`${BASE}/api/chat`)은 메타변수 정규식이 내용을 보지 못해 문자열 안의 경로로 본다
+                - pattern-regex: '["''`][^"''`\n]*/api/(ai|chat|gpt|llm|genai|generate|completions?)\b[^"''`\n]*["''`]'
+                - patterns:
+                    - pattern-either:
+                        - pattern: fetch($U, ...)
+                        - pattern: $A.$VERB($U, ...)
+                        - pattern: useSWR($U, ...)
+                    - metavariable-regex:
+                        metavariable: $U
+                        regex: (?i)^[`'"].*((/|\b)(ai|gpt|llm|openai|genai|claude|gemini|chat/completions)|/api/(chat|generate|completions?))(/|[`'"?]).*
+                - patterns:
+                    - pattern-either:
+                        - pattern: $F(...)
+                        - pattern: $O.$F(...)
+                        - pattern: <$F ... />
+                        - pattern: <$F ...>...</$F>
+                    - metavariable-regex:
+                        metavariable: $F
+                        regex: ^(use|fetch|get|post|request|generate|create)?(Ai|AI|Gpt|GPT|Llm|LLM|Rag|RAG)[A-Z]\w*$|^(ai|gpt|llm|rag)[A-Z]\w*$
+                    - pattern-not-inside: |
+                        import { ..., $F, ... } from "react-icons/ai";
+                        ...
+                # 대화 메시지의 발화자 'assistant' — 생성형 모델의 답을 다루는 채팅 구조다
+                - patterns:
+                    - pattern-either:
+                        - pattern: '{..., $K: "assistant", ...}'
+                        - pattern: $M.$K === "assistant"
+                        - pattern: $M.$K == "assistant"
+                    - metavariable-regex:
+                        metavariable: $K
+                        regex: ^(role|type|sender|author|from)$
           - id: renders-jsx
             static:
               pattern-regex: return\s*\(\s*<

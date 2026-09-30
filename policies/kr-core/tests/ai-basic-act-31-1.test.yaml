@@ -133,14 +133,11 @@ cases:
     expect: not-applicable
   - file: ai-basic-act-31-1/ai-course-page.tsx
     note: >
-      AI 라는 말이 많이 나오지만 모델을 부르지 않는 강의 소개. 제31조 제2항 규칙은 이름
-      AiCoursePage 때문에 적용된다(이름만 보는 적용 조건의 한계, ai-basic-act-31/ai-course-page-nolabel.tsx
-      와 같다). 강의 소개의 '생성형 AI' 는 약한 문구 대안이라 혼자 경고를 풀지 못하고 판정자에게
-      다시 묻는다. 결과물 표시가 없으니 판정자는 '아니오'라 답하고 검토 필요로 남는다
+      AI 라는 말이 많이 나오지만 모델을 부르지 않는 강의 소개. 두 규칙 모두 적용되지 않는다(제31조 제2항
+      규칙이 이름 AiCoursePage 로 적용되던 한계는 코드 모양을 보는 적용 조건으로 풀었다)
     expect:
       kr.ai-basic-act.31-1/genai-feature-without-prior-notice: not-applicable
-      kr.ai-basic-act.31/ai-output-without-label: needs-review
-    ai: {ai-label: no, ai-machine-mark: no}
+      kr.ai-basic-act.31/ai-output-without-label: not-applicable
   - file: ai-basic-act-31-1/chat-route.ts
     note: 화면 없는 API 경로. 고지는 이 경로를 쓰는 화면(또는 약관·계약서)에서 본다
     expect: not-applicable
@@ -184,9 +181,11 @@ cases:
   - file: ai-basic-act-31-1/lib-ai-helper.tsx
     note: >
       자체 AI 모듈의 도우미(@/lib/ai 의 summarizeReviews). 경로 이름만 본 약한 근거다.
-      제31조 제2항 규칙은 이 파일에 AI 라는 문자열이 없어 적용되지 않는다
-    expect: needs-review
-    ai: {ai-prior-notice: no}
+      그 요약을 화면에 그리므로 제31조 제2항 규칙도 적용된다(AI 모듈을 가져오는 것을 적용 조건이 본다)
+    expect:
+      kr.ai-basic-act.31-1/genai-feature-without-prior-notice: needs-review
+      kr.ai-basic-act.31/ai-output-without-label: needs-review
+    ai: {ai-prior-notice: no, ai-label: no, ai-machine-mark: no}
   - file: ai-basic-act-31-1/base-url-chat.tsx
     note: 기준 URL 을 붙인 템플릿 문자열 `${API_BASE}/api/chat`
     expect:
