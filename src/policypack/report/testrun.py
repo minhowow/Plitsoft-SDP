@@ -38,9 +38,9 @@ def render(run: TestRun, root, explain: bool = False, color: bool | None = None,
                     out.extend(st.dim(f"        {t}") for t in r.trace)
                 continue
             if r.declared:
-                why = f"기대 {LABEL[r.expected]} · 실제 {LABEL[r.actual]}"
+                why = f"기대 '{LABEL[r.expected]}' · 실제 '{LABEL[r.actual]}'"
             else:
-                why = f"적지 않은 규칙이 걸렸습니다 · 실제 {LABEL[r.actual]}"
+                why = f"적지 않은 규칙이 걸렸습니다 · 실제 '{LABEL[r.actual]}'"
             if r.unanswered and matches(r.expected, r.actual):
                 why = f"{LABEL[r.actual]} · 답이 적히지 않은 AI 질문이 있습니다"
             out.append(f"  {st.warn('실패')}  {r.fixture.id:<{width}}  {why}")

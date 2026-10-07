@@ -33,7 +33,7 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             "questions_asked": result.questions_asked,
             "ai_answered": result.ai_answered,
             "questions_sent": result.questions_sent,
-            # 판정자가 연달아 시간 안에 답하지 않아 보내지 않은 질문 수
+            # 판정자가 연달아 시간 안에 답하지 않아 보내지 않은 서로 다른 질문 수(questions_sent 와 같은 기준)
             "questions_skipped": result.questions_skipped,
             # AI 에게 물어야 했는데 답을 받지 못한 판정 단위 수(판정자 없음 포함)
             "ai_pending": result.ai_pending,
@@ -99,5 +99,5 @@ def dumps(*args, **kwargs) -> str:
 
 
 def cleared_record(c: dict, path) -> dict:
-    """AI 해제 기록 하나. 판정 파일을 다른 출력과 같은 기준(상대 경로)으로 낸다."""
+    """해제 기록 하나(AI·정적). 판정 파일을 다른 출력과 같은 기준(상대 경로)으로 낸다."""
     return {**c, "file": path(c["file"])}

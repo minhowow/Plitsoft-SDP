@@ -660,6 +660,27 @@ def test_top_level_sends_are_judged_on_their_own_lines(tmp_path, kr):
     assert [(x.top_level, x.anchor_lines, x.outcome.value) for x in ads] == [(True, [7], "needs-review")]
 
 
+def test_a_static_clearance_lists_only_the_matches_of_its_own_zone(tmp_path, kr):
+    """함수 단위에서 풀린 기록의 줄은 그 구역의 매치뿐이다. 다른 함수나 함수 밖의 가드 줄을 싣지 않는다."""
+    f = _one(
+        tmp_path,
+        "zones.ts",
+        "export async function sendDay(users) {\n"
+        "  const h = new Date().getHours();\n"
+        "  if (h >= 21 || h < 8) { return; }\n"
+        '  for (const u of users) await sms.send({ to: u.phone, text: "(광고) 주간 특가" });\n'
+        "}\n\n"
+        "const hour = new Date().getHours();\n"
+        'if (hour >= 21 || hour < 8) { throw new Error("night"); }\n'
+        'await sms.send({ to: ADMIN, text: "(광고) 오픈 기념" });\n',
+    )
+    pack = anchored(kr)
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static)
+    got = [(c["line"], c["alternatives"]) for c in res.static_cleared if c["rule"] == "ad-send-without-night-guard"]
+    assert got == [(4, [{"id": "night-hour-block", "lines": [3]}]), (9, [{"id": "night-hour-block", "lines": [8]}])]
+
+
 def test_one_line_function_has_no_context_region(tmp_path, kr):
     from policypack.report import sarif
 

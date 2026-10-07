@@ -134,7 +134,7 @@ cases:
       TODO 가 코드 줄 끝에 붙어 있고, 판정자가 그 줄을 통째로 인용해 '예'라고 답한다. required 는 주석을 떼고
       남은 코드(const from = ...)가 실재하니 받는다. 이 정책의 AI 대안은 '이 문구가 코드에 실제로 있는가'를
       묻는 strict 라 인용을 한 글자도 고치지 않고 주석 없는 코드에서 찾으므로 받지 않는다. evidence 를
-      required 로 되돌리면 이 case 가 '준수'로 바뀌어 실패한다
+      required 로 되돌리면 이 case 가 '충족 근거 발견'으로 바뀌어 실패한다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
       kr.network-act.50-4/nonemail-start-block: needs-review

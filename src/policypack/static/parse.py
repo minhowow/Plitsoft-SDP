@@ -3,8 +3,9 @@
 ## 오류를 가르는 방식이 왜 이렇게 생겼나
 
 `errors[]` 를 "path 가 있으면 파일 문제, 없으면 규칙 문제"로 가르면 안 된다. **PartialParsing
-오류에는 최상위 path 키가 없다**(실측). 경로가 `type` 안의 스팬 목록에 중첩돼 있다. 그렇게 가르면
-파일 일부가 파싱되지 않는 평범한 저장소를 스캔할 때 "정책 팩의 정적 조건 오류"라며 즉시 터진다.
+오류에 최상위 path 키가 없을 수 있다**(처음 잴 때는 없었고 경로가 `type` 안의 스팬 목록에 중첩돼
+있었다. 1.176.1 은 path 를 싣는다 — 2026-10-07 실측). 그렇게 가르면 파일 일부가 파싱되지 않는
+평범한 저장소를 스캔할 때 "정책 팩의 정적 조건 오류"라며 즉시 터진다.
 
 여기서는 `type` 을 명시적으로 분기한다. semgrep 내부 구현에 우연히 기대지 않는다.
 
@@ -214,8 +215,9 @@ def parse_semgrep_json(data: dict[str, Any], table: dict[str, RuleInfo] | None =
         if label in FILE_LEVEL_ERRORS:
             # 파일 단위 오류인데 어느 파일인지 모른다. 규칙 오류는 아니지만 버리지도 않는다.
             # 백엔드가 그 실행의 대상 전체를 믿을 수 없는 것으로 둔다.
-            msg = (err.get("long_msg") or err.get("message") or "").strip()
-            result.unlocated_errors.append(f"[{label}] {msg[:200]}")
+            # 파싱 오류의 문구는 코드를 인용한다(`const x =` was unexpected). 보고서에 실리므로 종류만 남긴다
+            msg = "" if label in PARSE_ERRORS else (err.get("long_msg") or err.get("message") or "").strip()
+            result.unlocated_errors.append(f"[{label}] {msg[:200]}".rstrip())
             continue
 
         msg = (err.get("long_msg") or err.get("message") or "").strip()

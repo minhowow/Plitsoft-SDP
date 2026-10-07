@@ -6,9 +6,9 @@
     rule_errors = [... for e in errors if not e.get("path")]
     if rule_errors: raise RuntimeError(...)
 
-그런데 PartialParsing 오류에는 최상위 `path` 가 없다. 경로가 `type` 안의 스팬 목록에
+그런데 PartialParsing 오류에는 최상위 `path` 가 없을 수 있다. 경로가 `type` 안의 스팬 목록에
 중첩돼 있다. 그래서 파일 일부가 파싱되지 않는 평범한 저장소를 스캔하면 "정책 팩의
-정적 조건 오류"라며 즉시 터진다.
+정적 조건 오류"라며 즉시 터진다. (1.176.1 은 최상위 `path` 도 싣는다. 두 모양을 다 받는다.)
 
 아래 JSON 은 semgrep 1.176 의 실제 출력 모양이다.
 """
@@ -274,6 +274,13 @@ def test_a_file_level_error_without_a_path_is_kept_not_dropped(label):
 def test_rule_errors_without_a_path_still_stop_the_scan():
     err = {"type": "Rule parse error", "level": "error", "message": "bad pattern"}
     assert parse_semgrep_json({"results": [], "errors": [err]}).rule_errors
+
+
+def test_a_parse_error_without_a_path_keeps_its_kind_not_the_engines_quote_of_the_code():
+    """엔진의 파싱 오류 문구는 코드를 인용한다. 그 문구가 보고서(engine_errors)에 실리면 판정자 없이도 코드가 나간다."""
+    message = "Syntax error at line a.ts:2:\n `const secret = 1` was unexpected"
+    res = parse_semgrep_json({"results": [], "errors": [{"type": "Syntax error", "level": "warn", "message": message}]})
+    assert res.unlocated_errors == ["[Syntax error]"]
 
 
 def test_the_backend_leaves_every_target_of_a_run_with_an_unlocated_error_unfinished(monkeypatch, tmp_path):

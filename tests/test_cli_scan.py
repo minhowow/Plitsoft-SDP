@@ -118,7 +118,7 @@ def test_json_report_tells_cleared_units_from_units_that_never_applied(capsys):
     r = doc["run"]
     assert r["fingerprint_version"] == "policypack/v1"
     assert r["questions_skipped"] == 0
-    assert r["static_cleared"], "픽스처에는 연령 분기가 있는 가입 코드가 있다"
+    assert COMPLIANT in {c["file"] for c in r["static_cleared"]}, "픽스처의 연령 분기가 있는 가입 코드"
     assert r["units"] == len(doc["findings"]) + len(r["ai_cleared"]) + len(r["static_cleared"])
     for c in r["static_cleared"]:
         assert not c["file"].startswith("/"), "findings[].file 과 같은 기준의 상대 경로다"
@@ -127,7 +127,7 @@ def test_json_report_tells_cleared_units_from_units_that_never_applied(capsys):
 
 @pytest.mark.parametrize("fmt", ["json", "sarif", "concise", "full"])
 def test_reports_without_a_judge_carry_none_of_the_scanned_code(fmt, capsys):
-    """판정자 없이 낸 보고서에는 검사한 코드가 없다. 나가는 것은 경로, 줄 번호, 대안 id, 팩의 글뿐이다."""
+    """판정자 없이 낸 보고서에는 검사한 코드가 없다. 코드에서 나가는 것은 경로, 줄 번호, 둘레 줄의 해시(지문)다."""
     folder = REPO / "policies/kr-core/tests/pipa-22-2"
     run(str(folder), "--output-format", fmt, "--no-color")
     out = capsys.readouterr().out
@@ -459,6 +459,7 @@ def test_unparsed_files_appear_in_json(tmp_path, capsys):
     run(str(broken), "--output-format", "json")
     data = json.loads(capsys.readouterr().out)
     assert len(data["run"]["unparsed"]) == 1
+    assert data["run"]["engine_errors"] == [], "엔진의 파싱 오류 문구는 코드를 인용한다. 보고서에 싣지 않는다"
 
 
 def test_clean_parse_reports_no_gaps(capsys):

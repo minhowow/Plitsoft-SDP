@@ -246,6 +246,26 @@ def test_a_warning_cleared_by_static_evidence_is_recorded_with_line_numbers_only
     assert set(alt) == {"id", "lines"} and set(c) == {"policy", "rule", "file", "line", "alternatives"}
 
 
+def test_a_static_clearance_names_only_the_strong_alternative(pack, tmp_path):
+    """약한 대안은 참이어도 혼자 경고를 풀지 못한다. 풀린 기록에는 강한 대안만 싣고, line 은 판정이 걸린 줄이다."""
+    f = tmp_path / "signup.ts"
+    f.write_text(
+        'router.post("/signup", async (req, res) => {\n'
+        "  const body = SignupSchema.parse(req.body);\n"
+        "  if (getAge(body.birthDate) < 14) {\n"
+        "    return checkGuardianConsent(body);\n"
+        "  }\n"
+        "  await prisma.user.create({ data: { email: body.email, birthDate: body.birthDate } });\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    res = _run(pack, f)
+    [u] = [u for u in res.units if u.policy.id == "kr.pipa.22-2"]
+    assert "대안 guardian-call: 정적 true" in u.trace, "시험이 비지 않았다: 약한 대안도 참이다"
+    [c] = [c for c in res.static_cleared if c["policy"] == "kr.pipa.22-2"]
+    assert c["line"] == 1 and c["alternatives"] == [{"id": "under14-branch", "lines": [3]}]
+
+
 def test_every_unit_ends_up_as_a_finding_or_a_recorded_clearance(pack):
     """units = findings + ai_cleared + static_cleared. 하나라도 빠지면 '경고 없음'의 까닭을 보고서로 알 수 없다."""
     targets = sorted(p for p in (FIX / "network-act-50-3").iterdir() if p.suffix in (".ts", ".tsx", ".js"))
@@ -254,7 +274,7 @@ def test_every_unit_ends_up_as_a_finding_or_a_recorded_clearance(pack):
         res = evaluate(pack, [Target(path=p, lang="typescript") for p in targets], static, judge=judge)
         assert res.units and res.static_cleared
         assert len(res.units) == len(res.findings) + len(res.ai_cleared) + len(res.static_cleared)
-        assert all(a["lines"] for c in res.static_cleared for a in c["alternatives"])
+        assert all(c["alternatives"] and all(a["lines"] for a in c["alternatives"]) for c in res.static_cleared)
 
 
 def test_a_unit_dropped_by_the_applicability_question_is_recorded(pack):
