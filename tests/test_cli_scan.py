@@ -135,15 +135,36 @@ def test_sarif_carries_the_statute_text(sarif):
     md = child["help"]["markdown"]
     assert "제22조의2" in md
     assert "법정대리인의 동의" in md, "조문 원문이 실려야 한다"
-    assert "시행 2026-09-11" in md
+    assert "받은 판본의 시행일 2026-09-11" in md
     assert "법률 자문이 아닙니다" in md
     assert child["helpUri"].startswith("https://www.law.go.kr")
+
+
+def test_sarif_marks_the_pack_authors_words_as_not_the_statute(sarif):
+    """help.markdown 에는 팩 작성자의 글과 조문 원문이 함께 실린다. 작성자의 글이 법의 말로 읽히면 안 된다."""
+    from policypack.pack.loader import load_pack
+
+    rules = {r["id"]: r for r in sarif["runs"][0]["tool"]["driver"]["rules"]}
+    md = rules["kr.pipa.22-2/signup-without-guard"]["help"]["markdown"]
+    policy = next(p for p in load_pack(REPO / "policies/kr-core").policies if p.id == "kr.pipa.22-2")
+    note = md.index("### 팩 작성자의 설명 (법 원문이 아닙니다)")
+    statute = md.index("### 개인정보 보호법 제22조의2")
+    assert note < md.index(policy.rationale.motivation.strip()) < statute
 
 
 def test_sarif_tags_carry_the_law(sarif):
     tags = sarif["runs"][0]["tool"]["driver"]["rules"][0]["properties"]["tags"]
     assert any(t.startswith("law:") for t in tags)
-    assert any(t.startswith("effective-from:") for t in tags)
+
+
+def test_sarif_tags_are_unique(capsys):
+    """한 조의 두 항을 고정한 정책(kr.network-act.50-4)에서 같은 태그가 두 번 나갔다. tags 는 중복이 없어야 한다."""
+    run(f"{FIX}/network-act-50-4", "--output-format", "sarif")
+    rules = json.loads(capsys.readouterr().out)["runs"][0]["tool"]["driver"]["rules"]
+    assert rules
+    for rule in rules:
+        tags = rule["properties"]["tags"]
+        assert len(tags) == len(set(tags)), rule["id"]
 
 
 def test_sarif_results_point_at_a_line(sarif):

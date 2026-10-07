@@ -5,9 +5,9 @@
 
 | SARIF 자리 | 우리가 넣는 것 |
 |---|---|
-| `rules[].help.markdown` | 조문 원문 + 시행일 + 법제처 링크 + 재검토 기한 |
+| `rules[].help.markdown` | 팩 작성자의 설명(제목으로 구분) + 조문 원문 + 판본 시행일 + 법제처 링크 + 재검토 기한 |
 | `rules[].helpUri` | 법제처 링크 |
-| `rules[].properties.tags` | `law:...`, `effective-from:...`, `category:...` |
+| `rules[].properties.tags` | `law:...`, `category:...` |
 | `results[].level` | 검토 필요 → warning · 불확실 → note |
 | `results[].partialFingerprints` | 줄 번호를 뺀 안정 해시 |
 | `results[].properties` | outcome, 판정 경로, 안 맞은 대안, 다 판정하지 못한 이유, AI 확인 필요 |
@@ -41,9 +41,14 @@ LEVEL = {
 
 
 def _legal_markdown(policy: Policy, base: Path) -> str:
-    """조문 원문을 그대로 싣는다. 해시로 고정된 그 파일이다."""
+    """조문 원문을 그대로 싣는다. 해시로 고정된 그 파일이다.
+
+    팩 작성자가 쓴 글은 제목을 붙여 원문과 구분한다. 같은 칸에 나란히 실리면 작성자의 말이
+    법의 말로 읽힌다.
+    """
     parts: list[str] = []
     if policy.rationale and policy.rationale.motivation:
+        parts.append("### 팩 작성자의 설명 (법 원문이 아닙니다)")
         parts.append(policy.rationale.motivation.strip())
 
     for ref in policy.legal.violated_when_failed if policy.legal else []:
@@ -51,7 +56,7 @@ def _legal_markdown(policy: Policy, base: Path) -> str:
         parts.append(head)
         meta = []
         if ref.effective_from:
-            meta.append(f"시행 {ref.effective_from}")
+            meta.append(f"받은 판본의 시행일 {ref.effective_from}(조문이 처음 시행된 날이 아닐 수 있음)")
         if ref.law_id:
             meta.append(f"법령ID {ref.law_id}")
         if ref.text_retrieved:
@@ -94,9 +99,8 @@ def _tags(policy: Policy) -> list[str]:
     tags = ["policypack", f"category:{policy.category}"]
     for ref in policy.legal.violated_when_failed if policy.legal else []:
         tags.append(f"law:{ref.statute}-{ref.article}")
-        if ref.effective_from:
-            tags.append(f"effective-from:{ref.effective_from}")
-    return tags
+    # 한 조의 두 항을 고정하면 같은 태그가 둘 나온다. 날짜는 태그로 내지 않는다 — 어느 조문의 날짜인지 묶을 수 없다
+    return list(dict.fromkeys(tags))
 
 
 def _uri(path_str: str, root: Path | None) -> str:

@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import re
+from enum import Enum
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from policypack.errors import PackError
-from policypack.model import PolicyPack
+from policypack.model import LegalRef, PolicyPack
 from policypack.pack.loader import check_legal_texts, check_review_dates, load_pack, pack_digest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -82,6 +85,78 @@ def test_every_statute_records_its_version(pack):
             assert ref.text_retrieved, label
             assert ref.effective_from, label
             assert ref.law_id, label
+
+
+def test_effective_from_is_the_date_printed_in_the_pinned_text(pack):
+    """effective-from 은 받은 판본의 시행일이다. 손으로 적은 날짜가 원문과 어긋나면 안 된다.
+
+    2026-10-06 까지 시행령 제23조에는 부칙에서 읽은 날짜(2026-01-22)가 손으로 적혀 있었다. 부칙은
+    고정하지 않은 글이라 보고서의 '시행' 줄이 확인할 수 없는 말이 됐다.
+
+    보고서의 근거 줄에 나가는 법 이름과 조도 원문 첫 줄과 같아야 한다(항은 보지 않는다).
+    """
+    for policy in pack.policies:
+        for ref in policy.legal.violated_when_failed:
+            head = (KR_CORE / ref.text_file).read_text(encoding="utf-8").splitlines()[:3]
+            assert head[0].startswith(f"{ref.statute} {ref.article}("), f"{policy.id}: 원문 첫 줄 {head[0]}"
+            printed = [m.group(1) for line in head if (m := re.fullmatch(r"시행 (\d{4}-\d{2}-\d{2})", line))]
+            assert printed == [ref.effective_from.isoformat()], f"{policy.id}/{ref.article}: 원문 머리 {printed}"
+
+
+# 조와 별표의 번호. 이용자에게 보이는 글에 나오면 그 정책이 원문을 고정한 조문이어야 한다.
+CITED = re.compile(r"제\s*\d+\s*조(?:의\s*\d+)?|별표\s*\d+")
+# 부칙과 제재. 고정한 원문에 그 낱말이 있을 때만 쓴다.
+UNPINNED_TALK = re.compile(r"부칙|과태료|과징금|벌금|징역|벌칙|처벌|시정명령")
+# 고정한 조문이 가리키기만 하고 원문은 팩에 없는 것. 원문을 _legal 에 고정하면 여기서 지운다.
+POINTED_ONLY = {"kr.network-act.50-4": {"별표6"}}
+NOT_PROSE = {"id", "category", "languages", "anchor_on"}
+
+
+def _prose(node, where=""):
+    """모델을 훑어 사람이 읽는 글을 낸다. 식별자, Semgrep 패턴(dict), 조문 참조는 글이 아니다.
+
+    칸 이름을 하나씩 적지 않는다. 문법에 글 칸이 새로 생겨도 빠지지 않아야 한다.
+    """
+    if isinstance(node, (LegalRef, Enum)):
+        return
+    if isinstance(node, BaseModel):
+        here = f"{where}/{node.id}" if isinstance(getattr(node, "id", None), str) else where
+        for name in type(node).model_fields:
+            if name not in NOT_PROSE:
+                yield from _prose(getattr(node, name), f"{here}.{name}")
+    elif isinstance(node, list):
+        for item in node:
+            yield from _prose(item, where)
+    elif isinstance(node, str):
+        yield where, node
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def test_visible_text_cites_only_what_the_policy_pins(pack):
+    """이용자에게 보이는 글은 그 정책이 원문을 고정한 조문만 번호로 가리킨다.
+
+    2026-10-06 점검: 고정하지 않은 제43조의 과태료 금액, 부칙, 제2조·제4조가 보고서에 실리고 있었다.
+    틀린 말이 아니어도 원문과 대조할 길이 없다. 고치는 길은 둘이다. 원문을 받아 violated-when-failed 에
+    넣거나, 그 말을 YAML 주석으로 옮긴다.
+
+    보는 것은 조·별표의 번호와 낱말 몇 개뿐이다. 항·호가 맞는지, 어느 법의 조문인지, 번호 없이 적은
+    날짜·금액·해석은 보지 않는다. 걸러내는 그물이지 증명이 아니다.
+    """
+    kinds = set()
+    for policy in pack.policies:
+        refs = policy.legal.violated_when_failed
+        pinned = {_squash(ref.article) for ref in refs} | POINTED_ONLY.get(policy.id, set())
+        texts = "".join((KR_CORE / ref.text_file).read_text(encoding="utf-8") for ref in refs)
+        for where, text in _prose(policy):
+            kinds.add(where.rsplit(".", 1)[-1])
+            loose = {_squash(m.group(0)) for m in CITED.finditer(text)} - pinned
+            loose |= {word for word in UNPINNED_TALK.findall(text) if word not in texts}
+            assert not loose, f"{where.lstrip('/')}: 고정한 원문에 없는 {sorted(loose)}"
+    missed = {"title", "ask_developer", "motivation", "implementation", "question", "message", "remediation"} - kinds
+    assert not missed, f"_prose 가 찾지 못한 글 칸: {sorted(missed)}"
 
 
 def test_amended_statute_is_detected(pack, tmp_path):
