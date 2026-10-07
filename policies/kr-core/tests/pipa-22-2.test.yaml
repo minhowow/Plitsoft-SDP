@@ -59,3 +59,31 @@ cases:
       잠금 파일의 나이(const age = Date.now() - mtime), path 의 join, registerCleanup. 파일 전체의 낱말을 보던 적용
       조건이 가입 코드로 읽었다(dev 평가 2026-09-30)
     expect: not-applicable
+  - file: pipa-22-2/age-gate-checkbox.tsx
+    note: >
+      생년월일을 받고, '[필수] 만 14세 이상입니다' 를 체크해야 가입된다. 문구만 본 약한 대안(age-gate-text)은
+      혼자 풀지 못한다. 판정자가 가입을 막는 줄을 인용해야 풀린다
+    expect: compliant
+    ai:
+      ai-guard: {answer: yes, cite: 'if (!over14) return;'}
+  - file: pipa-22-2/age-gate-checkbox.tsx
+    id: pipa-22-2/age-gate-checkbox.tsx#judge-says-no
+    note: >
+      같은 화면을 판정자가 인정하지 않으면 경고가 남는다. 자기 확인 항목만으로 충분한지는 사람이 정한다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/terms-sentence-only.ts
+    note: >
+      약관 문장에만 '만 14세 미만은 가입할 수 없습니다' 라고 적고 가입은 그대로 받는다. 문구는 약한 근거일 뿐이라
+      판정자가 막는 처리를 찾지 못하면 경고가 남는다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/age-gate-only.tsx
+    note: >
+      나이를 받지 않고 '만 14세 이상입니다' 항목만 둔 가입. 이 규칙은 나이를 받는 가입만 본다(알려진 한계:
+      나이를 묻지 않는 가입은 경고하지 않는다). 2026-10-06 까지는 이 문구를 나이 수집으로 세어 경고를 냈다
+    expect: not-applicable
+  - file: pipa-22-2/join-word-not-signup.ts
+    note: >
+      SQL 의 "JOIN", 소켓 이벤트 "join", 서비스 워커의 "register" 와 age 필드. 가입 경로가 아니다
+    expect: not-applicable
