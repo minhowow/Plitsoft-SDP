@@ -33,7 +33,7 @@ REPO = Path(__file__).resolve().parents[1]
 KR_CORE = REPO / "policies" / "kr-core"
 PROBES = REPO / "tests" / "data" / "anchor"
 
-#: kr-core 세 규칙을 함수 단위로 잴 때 판정 위치로 쓸 applies-when 조건. 팩에는 적지 않는다(팩 해시가 바뀐다).
+#: kr-core 세 규칙을 함수 단위로 잴 때 판정 위치로 쓸 applies-when 조건. 팩에서는 야간 광고 규칙만 함수 단위다.
 ANCHOR_ON = {
     "signup-without-guard": "signup-context",
     "ad-send-without-night-guard": "send-call",
@@ -58,9 +58,22 @@ def flagged(res) -> set[str]:
     return {f.case or f.file for f in res.findings if f.outcome.is_finding}
 
 
+def file_scoped(pack):
+    """모든 규칙을 scope: file 로 되돌린 사본. 내장 팩의 야간 광고 규칙이 함수 단위라 file 기준을 따로 만든다."""
+
+    def convert(r):
+        raw = r.model_dump(by_alias=True, exclude_none=True)
+        raw.pop("scope", None)
+        raw.pop("anchor-on", None)
+        return Rule.model_validate(raw)
+
+    policies = [pol.model_copy(update={"rules": [convert(r) for r in pol.rules]}) for pol in pack.policies]
+    return pack.model_copy(update={"policies": policies})
+
+
 @pytest.fixture(scope="module")
 def kr():
-    return load_pack(KR_CORE)
+    return file_scoped(load_pack(KR_CORE))
 
 
 # ── 문법 ────────────────────────────────────────────────────────────────────

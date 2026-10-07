@@ -198,6 +198,14 @@ policies:
 
     rules:
       - id: ad-send-without-night-guard
+        # 파일이 아니라 발송 호출을 감싸는 함수마다 판정한다. 파일 단위로 보면 가드가 있는 발송 하나가 같은
+        # 파일의 다른 광고 발송까지 풀었다(2026-10-06 탐침: 주간 가드가 있는 발송과 가드 없는 반짝 세일
+        # 발송이 한 파일에 있으면 경고가 없었다). 대가는 셋이다. 광고와 인증번호를 한 파일에서 보내면 인증번호
+        # 함수에도 경고가 난다. 스케줄을 발송 함수 밖에서 거는 코드(큐에 반복 작업을 넣는 쪽과 꺼내 보내는
+        # 쪽이 다른 함수)는 주간 스케줄이어도 경고가 난다. 둘 다 사람이 넘길 수 있는 쪽의 오류다. 그리고 함수
+        # 경계를 얻느라 정적 검사가 2~3배 느려진다(dev 저장소 20개에서 160초 → 425초, 2026-10-07).
+        scope: anchor
+        anchor-on: send-call
         applies-when:
           # 광고 표시. '(광고)' 와 흔히 쓰는 '[광고]' 에 더해, 빈칸·부호를 넣거나 전각 괄호를 쓴 변형
           # ('(광 고)', '[광.고]', '（광고）')도 센다. 여기서는 광고인지를 가리는 신호라 넓게 센다. 표기가
@@ -398,6 +406,19 @@ policies:
                 - metavariable-regex:
                     metavariable: $SPEC
                     regex: ^\s*(\S+\s+)?\S+\s+([89]|1\d|20)(\s+\S+){3}\s*$
+                # 시간대를 서울이 아닌 곳으로 적은 스케줄은 받지 않는다. "0 12 * * *" 에 timezone "UTC" 면 한국
+                # 시각 21시다. 시간대를 적지 않았거나 변수로 준 스케줄은 받는다 — 서버 시간대가 한국이라고 보는
+                # 것이고, UTC 로 도는 서버에서는 틀린다(알려진 한계. night-hour-block 의 getHours() 도 같다).
+                - pattern-not: |
+                    $C.schedule("$SPEC", $FN, {..., timezone: "=~/^(?!Asia\/Seoul$)/", ...})
+                - pattern-not: |
+                    $C.schedule("$SPEC", $FN, {..., tz: "=~/^(?!Asia\/Seoul$)/", ...})
+                - pattern-not: |
+                    {..., pattern: "$SPEC", ..., tz: "=~/^(?!Asia\/Seoul$)/", ...}
+                - pattern-not: |
+                    {..., cron: "$SPEC", ..., tz: "=~/^(?!Asia\/Seoul$)/", ...}
+                - pattern-not: |
+                    {..., cron: "$SPEC", ..., timezone: "=~/^(?!Asia\/Seoul$)/", ...}
             on-unsatisfied:
               message: 주간에만 발송한다고 볼 수 있는 스케줄 설정이 없습니다.
               ask-developer: 이 광고는 어떤 스케줄로 발송되나요?
