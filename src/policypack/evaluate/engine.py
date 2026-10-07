@@ -436,6 +436,8 @@ class EvalResult:
     questions_sent: int = 0
     """판정자에게 실제로 보낸 서로 다른 질문 수. 같은 질문은 한 실행에서 한 번만 보내므로(OncePerRun)
     questions_asked 보다 적을 수 있다. 어댑터 안의 재시도는 세지 않는다. cmd_scan 이 판정자에게서 받아 적는다."""
+    questions_skipped: int = 0
+    """판정자가 연달아 시간 안에 답하지 않아 보내지 않은 질문 수. cmd_scan 이 판정자에게서 받아 적는다."""
     ai_pending: int = 0
     """AI 에게 물어야 했는데 판정에 넣을 답이 없어 경고로 남은 판정 단위 수(판정자 없음 포함). 다른 대안이 풀어
     준수가 된 단위는 세지 않는다 — 답을 받았어도 결론이 바뀌지 않는다."""
@@ -443,6 +445,10 @@ class EvalResult:
     """AI 의 '예'로 경고가 풀린 단위. 규칙·파일·인용한 줄·관문 결과를 남겨 사람이 검토할 수 있게 한다."""
     ai_dismissed: list[dict] = field(default_factory=list)
     """적용 질문의 '아니오'로 판정 대상에서 빠진 단위. 인용 없이 빠지므로 흔적을 남긴다."""
+    static_cleared: list[dict] = field(default_factory=list)
+    """강한 정적 대안으로 경고가 풀린 단위. 규칙·파일·대안 id·맞은 줄 번호를 남긴다(코드는 싣지 않는다).
+    경고가 없는 까닭이 '적용 신호 없음'인지 '충족 근거 발견'인지 보고서에서 가를 수 있게 한다.
+    units = findings + ai_cleared + static_cleared 다."""
     static_seconds: float = 0.0
     engine: str = ""
     """정적 조건을 돌린 엔진과 판본(예: "semgrep 1.176.1"). 보고서에 싣는다 — 엔진이 바뀌면 결과가 달라질 수 있다."""
@@ -818,6 +824,8 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
             cleared = _cleared_by_ai(u)
             if cleared:
                 result.ai_cleared.append(cleared)
+            else:
+                result.static_cleared.append(_cleared_by_static(u, static))
             continue
         if u.pending:
             # 경고로 남은 단위만 센다. 다른 대안이 이미 풀었다면 물을 필요가 있었어도 결론은 바뀌지 않는다
@@ -888,6 +896,31 @@ def _cleared_by_ai(u: Unit) -> dict | None:
         "line": u.anchor.start.line if u.anchor else None,
         "alternatives": [{"id": pred.id, "cite": a.evidence, "gate": u.cited.get(pred.id, "")} for pred, a in yes],
     }
+
+
+def _cleared_by_static(u: Unit, static: StaticResult) -> dict:
+    """강한 정적 대안이 푼 단위의 기록. 줄 번호만 싣는다 — 판정자 없이 낸 보고서에는 검사한 코드가 없다."""
+    return {
+        "policy": u.policy.id,
+        "rule": u.rule.id,
+        "file": str(u.target.path),
+        "line": u.anchor.start.line if u.anchor else None,
+        "alternatives": [
+            {"id": pred.id, "lines": _match_lines(u, pred, static)}
+            for kind, pred, value in u.alts
+            if kind == "static" and value is TRUE and pred.strength is Strength.STRONG
+        ],
+    }
+
+
+def _match_lines(u: Unit, pred: Predicate, static: StaticResult) -> list[int]:
+    """이 단위의 구역에서 대안이 맞은 자리의 첫 줄. static_value_in 이 참으로 본 매치와 같은 것을 고른다."""
+    spans = static.spans(PredicateKey(u.policy.id, u.rule.id, GROUP_COMPLIANT, pred.id), u.target.path.resolve())
+    if u.region is not None:
+        spans = [s for s in spans if _overlaps(s, u.region)]
+    elif u.outside:
+        spans = [s for s in spans if any(not _covered(n, u.outside) for n in range(s.start.line, s.end.line + 1))]
+    return sorted({s.start.line for s in spans})
 
 
 def _unfinished_targets(targets: list[Target], static: StaticResult) -> list[str]:

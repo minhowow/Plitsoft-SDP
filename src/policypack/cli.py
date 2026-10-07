@@ -274,7 +274,7 @@ class Selection:
 
 #: 판정자에게 코드를 보내는 곳. 판정 규칙이 하나라 범위도 하나다(evaluate/planner.py).
 _EGRESS_SCOPE = (
-    "규칙이 적용되는데 강한 정적 대안으로 준수가 확인되지 않은 파일(이름·정규식 같은 약한 근거로만 준수가 보이는 "
+    "규칙이 적용되는데 강한 정적 대안으로 충족이 확인되지 않은 파일(이름·정규식 같은 약한 근거로만 충족이 보이는 "
     "파일 포함)과, 적용 여부가 정적으로 정해지지 않아 적용 질문(applies-ai)을 묻는 파일"
 )
 
@@ -521,6 +521,7 @@ def cmd_scan(args) -> int:
     result = evaluate(pack, targets, static, judge=judge)
     result.skipped = [str(p) for p in found.skipped_files()]
     result.questions_sent = getattr(judge, "sent", 0)
+    result.questions_skipped = getattr(judge, "skipped", 0)
     if getattr(judge, "skipped", 0):
         print(
             f"주의: 판정자가 연달아 {judge.GIVE_UP_AFTER}번 시간 안에 답하지 않아 남은 질문 {judge.skipped}개는 "

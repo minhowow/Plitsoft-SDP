@@ -107,6 +107,50 @@ def test_recordings_are_not_a_judge(capsys):
     assert "모르는 판정자" in capsys.readouterr().err
 
 
+# ── JSON 보고서의 계약 ──────────────────────────────────────────────────────
+
+
+def test_json_report_tells_cleared_units_from_units_that_never_applied(capsys):
+    """경고가 없는 까닭을 가를 수 있어야 한다. 적용된 단위는 경고이거나, 풀린 기록으로 남는다."""
+    run(f"{FIX}/pipa-22-2", "--output-format", "json")
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["schema_version"] == 1
+    r = doc["run"]
+    assert r["fingerprint_version"] == "policypack/v1"
+    assert r["questions_skipped"] == 0
+    assert r["static_cleared"], "픽스처에는 연령 분기가 있는 가입 코드가 있다"
+    assert r["units"] == len(doc["findings"]) + len(r["ai_cleared"]) + len(r["static_cleared"])
+    for c in r["static_cleared"]:
+        assert not c["file"].startswith("/"), "findings[].file 과 같은 기준의 상대 경로다"
+        assert c["alternatives"] and all(a["lines"] for a in c["alternatives"])
+
+
+@pytest.mark.parametrize("fmt", ["json", "sarif", "concise", "full"])
+def test_reports_without_a_judge_carry_none_of_the_scanned_code(fmt, capsys):
+    """판정자 없이 낸 보고서에는 검사한 코드가 없다. 나가는 것은 경로, 줄 번호, 대안 id, 팩의 글뿐이다."""
+    folder = REPO / "policies/kr-core/tests/pipa-22-2"
+    run(str(folder), "--output-format", fmt, "--no-color")
+    out = capsys.readouterr().out
+    if fmt in ("json", "sarif"):
+        # JSON 은 따옴표와 역슬래시를 이스케이프한다. 풀어서 견줘야 따옴표가 든 코드 줄이 새는 것을 본다
+        def strings(node):
+            if isinstance(node, str):
+                yield node
+            elif isinstance(node, dict):
+                for v in node.values():
+                    yield from strings(v)
+            elif isinstance(node, list):
+                for v in node:
+                    yield from strings(v)
+
+        out = "\n".join(strings(json.loads(out)))
+    sources = [f for f in folder.iterdir() if f.is_file()]
+    lines = {line.strip() for f in sources for line in f.read_text(encoding="utf-8").splitlines()}
+    lines = {line for line in lines if len(line) >= 12}
+    assert len(lines) >= 20, "견줄 코드 줄이 있어야 한다"
+    assert [line for line in lines if line in out] == []
+
+
 # ── SARIF ───────────────────────────────────────────────────────────────────
 
 

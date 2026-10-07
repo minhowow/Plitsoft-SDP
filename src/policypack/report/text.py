@@ -24,7 +24,7 @@ from policypack.report.paths import rel
 LABEL = {
     Outcome.NEEDS_REVIEW: "검토 필요",
     Outcome.NEEDS_REVIEW_UNCERTAIN: "검토 필요(불확실)",
-    Outcome.COMPLIANT: "준수",
+    Outcome.COMPLIANT: "충족 근거 발견",
 }
 
 UNTESTED_WHY = {
@@ -178,7 +178,8 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path 
     flagged_units = {(f.policy, f.rule, str(Path(f.file).resolve()), f.region, f.top_level) for f in findings}
     compliant = sum(1 for u in result.units if _unit_key(u) not in flagged_units)
     if compliant > 0:
-        parts.append(st.ok(f"준수 {compliant}"))
+        # '준수'라고 적지 않는다. 도구가 본 것은 대안 하나를 채우는 근거이고, 법을 지켰는지는 사람이 정한다
+        parts.append(st.ok(f"충족 근거 발견 {compliant}"))
     if not parts:
         parts = [st.ok("검토할 것 없음")]
 

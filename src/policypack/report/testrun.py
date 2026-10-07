@@ -7,11 +7,12 @@ from pathlib import Path
 
 from policypack import __version__
 from policypack.packtest import CLEAR, TestRun, matches
+from policypack.report.json_out import SCHEMA_VERSION
 from policypack.report.paths import rel
 from policypack.report.text import Style, use_color
 
 LABEL = {
-    "compliant": "준수",
+    "compliant": "충족 근거 발견",
     "needs-review": "검토 필요",
     "needs-review-uncertain": "검토 필요(불확실)",
     "not-applicable": "해당 없음",
@@ -93,6 +94,7 @@ def render(run: TestRun, root, explain: bool = False, color: bool | None = None,
 def build(run: TestRun, root, pack_id: str, pack_digest: str) -> dict:
     declared = [r for r in run.rows if r.declared]
     return {
+        "schema_version": SCHEMA_VERSION,
         "tool": {"name": "policypack", "version": __version__},
         "run": {
             "command": "test",

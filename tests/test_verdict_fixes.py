@@ -232,6 +232,31 @@ def test_a_warning_cleared_by_static_evidence_is_not_counted_as_ai(pack):
     assert not [c for c in res.ai_cleared if c["policy"] == "kr.pipa.22-2"]
 
 
+def test_a_warning_cleared_by_static_evidence_is_recorded_with_line_numbers_only(pack):
+    """강한 정적 대안이 푼 단위도 결과에 남는다. 경고가 없는 까닭이 '적용 신호 없음'인지 '충족 근거 발견'인지
+    보고서에서 가를 수 있어야 한다. 대안 id 와 맞은 줄 번호만 싣고 코드는 싣지 않는다."""
+    path = FIX / "pipa-22-2" / "under14-branch.ts"
+    res = _run(pack, path)
+    assert _pipa(res) == []
+    [c] = [c for c in res.static_cleared if c["policy"] == "kr.pipa.22-2"]
+    [alt] = c["alternatives"]
+    assert alt["id"] == "under14-branch"
+    source = path.read_text(encoding="utf-8").split("\n")
+    assert [source[n - 1].strip() for n in alt["lines"]] == ["if (getAge(body.birthDate) < 14) {"]
+    assert set(alt) == {"id", "lines"} and set(c) == {"policy", "rule", "file", "line", "alternatives"}
+
+
+def test_every_unit_ends_up_as_a_finding_or_a_recorded_clearance(pack):
+    """units = findings + ai_cleared + static_cleared. 하나라도 빠지면 '경고 없음'의 까닭을 보고서로 알 수 없다."""
+    targets = sorted(p for p in (FIX / "network-act-50-3").iterdir() if p.suffix in (".ts", ".tsx", ".js"))
+    static = SemgrepBackend().run(compile_static(pack), targets)
+    for judge in (None, FakeJudge("예", echo_first_line=True), FakeJudge("아니오")):
+        res = evaluate(pack, [Target(path=p, lang="typescript") for p in targets], static, judge=judge)
+        assert res.units and res.static_cleared
+        assert len(res.units) == len(res.findings) + len(res.ai_cleared) + len(res.static_cleared)
+        assert all(a["lines"] for c in res.static_cleared for a in c["alternatives"])
+
+
 def test_a_unit_dropped_by_the_applicability_question_is_recorded(pack):
     """엔진이 파일을 끝내지 못하면 적용이 '모름'이고, 적용 질문의 '아니오'는 인용 없이 단위를 뺀다."""
     path = (FIX / "pipa-22-2" / "violating.ts").resolve()

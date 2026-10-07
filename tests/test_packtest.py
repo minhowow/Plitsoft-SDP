@@ -55,6 +55,7 @@ def test_kr_core_fixtures_pass_strictly():
     assert code == 0, [r for r in out["results"] if not r["passed"]]
     assert out["summary"]["failed"] == 0 and out["summary"]["gaps"] == 0
     assert out["run"]["missing"] == 0
+    assert out["schema_version"] == 1
 
 
 def test_every_rule_has_a_violating_fixture_and_sole_clearers():

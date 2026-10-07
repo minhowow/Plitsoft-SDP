@@ -292,10 +292,10 @@ def test_live_judge_announces_what_leaves_the_machine(tmp_path, monkeypatch, cap
 
 
 def test_notice_states_what_is_sent():
-    """약한 근거로만 준수가 보이는 파일도 판정자에게 간다. 고지가 그 범위를 말해야 한다."""
+    """약한 근거로만 충족이 보이는 파일도 판정자에게 간다. 고지가 그 범위를 말해야 한다."""
     from policypack.cli import _egress_notice
 
-    assert "약한 근거로만 준수가 보이는 파일 포함" in _egress_notice("claude-cli:haiku", env={})
+    assert "약한 근거로만 충족이 보이는 파일 포함" in _egress_notice("claude-cli:haiku", env={})
 
 
 def test_notice_names_the_real_destination_and_telemetry():

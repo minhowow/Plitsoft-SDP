@@ -12,25 +12,36 @@ from pathlib import Path
 
 from policypack import __version__
 from policypack.evaluate.engine import EvalResult
+from policypack.report.fingerprint import VERSION as FP_VERSION
 from policypack.report.fingerprint import fingerprints
 from policypack.report.paths import rel
+
+SCHEMA_VERSION = 1
+"""보고서 JSON(scan·test)의 판. 키를 더할 때는 올리지 않는다. 있던 키가 없어지거나 뜻이 바뀌면 올린다."""
 
 
 def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", meta: dict | None = None) -> dict:
     fps = fingerprints(result.findings, pack_digest, root)
     return {
+        "schema_version": SCHEMA_VERSION,
         "tool": {"name": "policypack", "version": __version__},
         "run": {
             "judge": result.judge_id or None,
             "pack_digest": pack_digest,
+            # findings[].fingerprint 를 만드는 방식의 이름. 방식을 바꾸면 이 값이 바뀐다
+            "fingerprint_version": FP_VERSION,
             "questions_asked": result.questions_asked,
             "ai_answered": result.ai_answered,
             "questions_sent": result.questions_sent,
+            # 판정자가 연달아 시간 안에 답하지 않아 보내지 않은 질문 수
+            "questions_skipped": result.questions_skipped,
             # AI 에게 물어야 했는데 답을 받지 못한 판정 단위 수(판정자 없음 포함)
             "ai_pending": result.ai_pending,
             # AI 의 '예'로 풀린 경고와, 적용 질문의 '아니오'로 빠진 판정. 사람이 검토할 수 있게 낸다
             "ai_cleared": [cleared_record(c, lambda p: _rel(p, root)) for c in result.ai_cleared],
             "ai_dismissed": [{**d, "file": _rel(d["file"], root)} for d in result.ai_dismissed],
+            # 강한 정적 대안으로 풀린 단위와 그 대안이 맞은 줄 번호. units = findings + ai_cleared + static_cleared
+            "static_cleared": [cleared_record(c, lambda p: _rel(p, root)) for c in result.static_cleared],
             "engine": _engine(result.engine),
             "static_seconds": round(result.static_seconds, 3),
             "ai_seconds": round(result.ai_seconds, 3),
