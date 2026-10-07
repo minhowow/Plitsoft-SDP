@@ -143,21 +143,28 @@ def test_choosing_files_for_function_boundaries():
     from policypack.static.backend import Match
     from policypack.static.semgrep_cli import region_targets
 
-    def rule(pred, role=None):
+    def rule(pred, role=None, generic=False):
         meta = {"policy": "p", "rule": "r", "group": "applies-when", "predicate": pred}
-        return {"id": f"p.r.{pred}", "metadata": {"policypack": {**meta, **({"anchor": role} if role else {})}}}
+        extra = {**({"anchor": role} if role else {}), **({"generic": True} if generic else {})}
+        return {"id": f"p.r.{pred}" + (".generic" if generic else ""), "metadata": {"policypack": {**meta, **extra}}}
 
     on, wth = PredicateKey("p", "r", "applies-when", "send"), PredicateKey("p", "r", "applies-when", "ad")
     span = Span(Pos(1, 1, 0), Pos(1, 5, 4))
-    a, b, c, d = (Path(f"/t/{n}.ts") for n in "abcd")
+    a, b, c, d, e, f = (Path(f"/t/{n}.ts") for n in "abcdef")
     result = StaticResult(
-        matches=[Match(on, a, span), Match(wth, a, span), Match(on, b, span), Match(on, c, span), Match(wth, d, span)],
+        matches=[Match(on, p, span) for p in (a, b, c, e, f)]
+        + [Match(wth, a, span), Match(wth, d, span), Match(wth, e, span)],
         partial_unparsed={c: []},
+        incomplete={e},
+        predicate_timeouts={f: [wth]},
     )
     rules = [rule("send", "on"), rule("ad", "with")]
-    # a: 두 조건이 다 맞았다. b: 판정 위치만 맞았다(규칙이 적용되지 않는다). c: 일부가 파싱되지 않아 다른 조건의
-    # '매치 없음'을 믿을 수 없다. d: 판정 위치가 없다(함수 경계가 있어도 쓸 데가 없다)
-    assert region_targets(rules, result, [a, b, c, d]) == [a, c]
+    # a: 두 조건이 다 맞았다. b: 판정 위치만 맞았다(규칙이 적용되지 않는다). c: 일부가 파싱되지 않아 구문 조건의
+    # '매치 없음'을 믿을 수 없다. d: 판정 위치가 없다(함수 경계가 있어도 쓸 데가 없다). e: 엔진이 끝내지 못한
+    # 파일은 고르지 않는다. f: 다른 조건이 시간 초과로 끊겼다('모름')
+    assert region_targets(rules, result, [a, b, c, d, e, f]) == [a, c, f]
+    # 다른 조건이 정규식 조건(generic 사본이 있다)이면 파싱이 안 된 파일에서도 '매치 없음'이 거짓이다
+    assert region_targets([*rules, rule("ad", "with", generic=True)], result, [a, b, c, d, e, f]) == [a, f]
     # 표지가 없는 설정(직접 쓴 시험용 설정)은 전부 고른다
     assert region_targets([rule("send"), rule("ad")], result, [a, b]) == [a, b]
 

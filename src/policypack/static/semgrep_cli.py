@@ -272,27 +272,39 @@ def timeout_from_env() -> float:
 
 
 def region_targets(rules: list[dict], result: StaticResult, targets: list[Path]) -> list[Path]:
-    """함수 경계가 필요한 대상. 함수 단위 규칙의 판정 위치(anchor-on) 조건이 맞았고, 그 규칙의 다른 적용 조건도
-    맞았거나 그 파일에서 값을 믿을 수 없는(파싱 실패·미완) 파일이다.
+    """함수 경계가 필요한 대상. 함수 단위 규칙의 판정 위치(anchor-on) 조건이 맞았고, 그 규칙의 다른 적용 조건이
+    하나도 '거짓'이 아닌 파일이다. '거짓'은 평가기와 같은 기준으로 본다(engine.static_value): 매치가 없고, 그
+    조건이 시간 초과로 끊기지 않았고, 파싱이 안 된 파일이라면 정규식 조건(generic 사본이 있는 것)일 때.
 
-    넉넉하게 고른다. 빠뜨린 파일은 함수 경계가 없어 파일 단위로 판정된다 — 경고를 잃지는 않지만 함수 단위가
-    막으려던 구멍(다른 함수의 가드가 푸는 것)이 그 파일에서 다시 열린다. 표지가 없는 설정이면 전부 고른다."""
+    엔진이 끝내지 못한 파일은 고르지 않는다. 그 파일은 조건이 전부 '모름'이라 어차피 '불확실'이고, 끝내지 못한
+    파일은 대개 한 줄로 축소된 큰 파일이라 경계 규칙이 가장 오래 걸리는 곳이다(실측: 130KB 두 개에 100초).
+    고르지 않은 파일은 함수 경계가 없어 파일 단위로 판정된다. 표지가 없는 설정이면 전부 고른다."""
     groups: dict[tuple[str, str], dict[str, set[PredicateKey]]] = {}
+    regex_only: set[PredicateKey] = set()
     for r in rules:
         meta = (r.get("metadata") or {}).get("policypack")
-        if isinstance(meta, dict) and meta.get(ANCHOR_ROLE) in ("on", "with"):
-            key = PredicateKey(meta["policy"], meta["rule"], meta["group"], meta["predicate"])
+        if not isinstance(meta, dict) or not all(k in meta for k in ("policy", "rule", "group", "predicate")):
+            continue
+        key = PredicateKey(meta["policy"], meta["rule"], meta["group"], meta["predicate"])
+        if meta.get("generic"):
+            regex_only.add(key)
+        if meta.get(ANCHOR_ROLE) in ("on", "with"):
             groups.setdefault((meta["policy"], meta["rule"]), {"on": set(), "with": set()})[meta[ANCHOR_ROLE]].add(key)
     if not groups:
         return list(targets)
     index = result.index()
-    shaky = result.unreliable_paths() | result.unfinished_paths()
+    unreliable = result.unreliable_paths()
+    unfinished = result.unfinished_index()
+
+    def not_false(key: PredicateKey, path: Path) -> bool:
+        if path in index.get(key, {}) or key in unfinished.get(path, ()):
+            return True
+        return path in unreliable and key not in regex_only
+
     need: set[Path] = set()
     for roles in groups.values():
         anchored = {p for k in roles["on"] for p in index.get(k, {})}
-        for path in anchored:
-            if all(path in index.get(k, {}) or path in shaky for k in roles["with"]):
-                need.add(path)
+        need |= {p for p in anchored - unfinished[None] if all(not_false(k, p) for k in roles["with"])}
     return [t for t in targets if t.resolve() in need]
 
 
