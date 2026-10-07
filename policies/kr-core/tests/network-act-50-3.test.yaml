@@ -262,8 +262,12 @@ cases:
   - file: network-act-50-3/two-sends-one-guarded.ts
     note: >
       주간 가드가 있는 발송과 가드 없는 반짝 세일 발송이 한 파일에 있다. 파일 단위로 보던 때는 앞의 가드가
-      뒤의 발송까지 풀어 경고가 없었다
-    expect: needs-review
+      뒤의 발송까지 풀어 경고가 없었다. 알려진 한계(놓침): 광고 표기 정책(kr.network-act.50-4)은 파일 단위라,
+      앞 발송의 '(광고) 가나다몰 02-…' 와 '무료거부 080-…' 이 표기도 수신거부도 없는 뒤 발송까지 푼다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: compliant
+      kr.network-act.50-4/nonemail-end-optout: compliant
     ai: {ai-night-guard: no}
   - file: network-act-50-3/two-schedules-one-night.ts
     note: 오전 9시 보고 스케줄과 21시 30분 광고 스케줄. 주간 스케줄 하나가 야간 스케줄의 발송을 풀면 안 된다
@@ -296,5 +300,87 @@ cases:
     note: >
       알려진 한계. 주간 반복 작업을 거는 함수와 꺼내 보내는 함수가 다르다. 함수 단위 판정은 발송 함수 밖의
       스케줄을 보지 못해 경고를 낸다
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/two-sends-one-guarded.ts
+    id: network-act-50-3/two-sends-one-guarded.ts#judge-cites-the-other-function
+    note: 판정자가 앞 함수의 가드를 인용해 '예'라고 답해도 뒤 함수의 경고는 풀리지 않는다(인용이 판정 구역 밖)
+    expect: needs-review
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: "if (hour >= 21 || hour < 8) return;"
+  - file: network-act-50-3/schedule-utc-night.ts
+    id: network-act-50-3/schedule-utc-night.ts#judge-cites-the-spec-line
+    note: >
+      함수 단위 판정에서 판정자는 콜백 앞의 스케줄 식은 참고 줄로 보지만 뒤에 오는 timezone 옵션은 보지 못한다. 그
+      식을 인용한 '예'는 판정 구역 밖이라 경고를 풀지 못한다
+    expect: needs-review
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: '"0 12 * * *",'
+  - file: network-act-50-3/schedule-pattern-timezone-utc.ts
+    note: '{ pattern, timezone: "UTC" } 꼴. "0 12 * * *" UTC 는 한국 시각 21시다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/firebase-schedule-utc-oneline.ts
+    note: Firebase 예약 함수. .timeZone("UTC") 를 사슬로 적은 "0 12 * * *" 는 한국 시각 21시다
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/queue-repeat-utc-flag-night.ts
+    note: '반복 작업의 pattern "0 13 * * *" 에 utc: true 는 한국 시각 22시다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-spec-tz-prefix-utc.ts
+    note: '식 앞에 시간대를 적은 "TZ=UTC 0 12 * * *" 는 한국 시각 21시다. TZ=UTC 를 초 칸으로 읽으면 안 된다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-spec-tz-prefix-seoul.ts
+    note: '식 앞에 시간대를 서울로 적은 "TZ=Asia/Seoul 0 10 * * *" 는 오전 10시다'
+    expect: compliant
+  - file: network-act-50-3/two-schedules-in-one-function.ts
+    note: >
+      알려진 한계(놓침). 오전 9시 보고 스케줄과 21시 30분 광고 스케줄을 한 함수 안에서 건다. 판정 구역이 가장
+      바깥 함수라 주간 스케줄이 야간 스케줄의 발송까지 푼다
+    expect: compliant
+  - file: network-act-50-3/top-level-send-guard-elsewhere.ts
+    note: >
+      알려진 한계(놓침). 발송이 모두 함수 밖이면 파일 전체로 판정한다. 다른 함수의 시각 가드가 최상위 발송을 푼다
+    expect: compliant
+  - file: network-act-50-3/schedule-named-handler-daytime.ts
+    note: >
+      알려진 한계(오탐). 이름 있는 처리기를 서울 오전 10시 스케줄에 건다. 스케줄 줄이 발송 함수 밖이라 정적 대안이
+      보지 못하고, 판정자가 그 줄을 인용해 '예'라고 답해도 판정 구역 밖이라 받지 않는다
+    expect: needs-review
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: 'cron.schedule("0 10 * * *", sendDailyPromo, { timezone: "Asia/Seoul" });'
+  - file: network-act-50-3/job-object-cron-tz-utc-night.ts
+    note: 작업 정의 객체에 cron 과 처리 함수를 함께 적는 꼴. cron "0 13 * * *" 에 tz "UTC" 는 한국 시각 22시다
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/job-object-cron-timezone-utc-night.ts
+    note: 같은 꼴에 시간대 키가 timezone 이다
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/job-object-cron-seoul-daytime.ts
+    note: 같은 꼴의 서울 오전 10시. 시간대를 적었다고 주간 스케줄까지 거르면 안 된다
+    expect: compliant
+  - file: network-act-50-3/two-sends-both-guarded.ts
+    note: 발송 함수 둘이 저마다 야간 가드를 둔다. 함수마다 판정해도 경고가 없어야 한다
+    expect: compliant
+  - file: network-act-50-3/schedule-newyork-night.ts
+    note: >
+      "0 9 * * *" 에 timezone "America/New_York" 은 한국 시각 22시나 23시다. UTC 만이 아니라 서울이 아닌 시간대는
+      모두 받지 않는다
+    decoy-for: [daytime-schedule]
     expect: needs-review
     ai: {ai-night-guard: no}

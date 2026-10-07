@@ -108,7 +108,29 @@ cases:
     expect: needs-review
     ai: {ai-guard: no}
 
+  - file: pipa-22-2/register-route.ts
+    note: 가입 경로가 "/api/auth/register" 다. signup 이라는 낱말은 없다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/join-route.tsx
+    note: 가입 요청을 "/members/join" 으로 보낸다
+    expect: needs-review
+    ai: {ai-guard: no}
+
   # ── 나이를 받는 모양 ─────────────────────────────────────────────────────────
+  - file: pipa-22-2/dob-shorthand.ts
+    note: 생년월일을 줄여 쓴 속성 { email, dob } 로 받는다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/date-of-birth-state.tsx
+    note: 생년월일을 상태 변수 dateOfBirth 로 받는다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/profile-partial-parse.ts
+    note: >
+      가입과 무관한 프로필 코드이고 파일 일부가 파싱되지 않는다. 가입 낱말이 하나도 없으면 생년 이름(birthday)만으로
+      '불확실'이 되면 안 된다
+    expect: not-applicable
   - file: pipa-22-2/user-birth.ts
     note: birth 가 이름 앞이 아니라 뒤에 오는 필드(userBirth)를 줄여 쓴 속성으로 받는다
     expect: needs-review

@@ -4,7 +4,7 @@ import { db } from "./db";
 const api = new brevo.TransactionalEmailsApi();
 api.setApiKey(brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_KEY!);
 
-export async function sendWeeklyDeals(title: string, html: string) {
+export async function sendWeeklyNewsletter(title: string, html: string) {
   const subscribers = await db.subscriber.findMany({ where: { emailAgreed: true } });
   for (const s of subscribers) {
     const mail = new brevo.SendSmtpEmail();

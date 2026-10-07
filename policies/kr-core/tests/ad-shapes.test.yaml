@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=../../../schemas/policy-test-0.1.json
 # 광고 두 정책이 여러 코드 모양에서 지금 내는 판정. 2026-10-06 점검에서 만든 탐침을 옮겼다.
 # '알려진 한계'라고 적은 기대는 바람직한 판정이 아니라 지금의 판정이다. 팩을 고치면 기대를 함께 고친다.
+# 적지 않은 규칙은 경고가 없어야 한다(해당 없음 또는 충족). 놓침이라고 적은 규칙은 not-applicable 로 적는다.
 apiVersion: policypack/test-0.1
 cases:
   # ── 문구가 파일 밖에 있다 ──────────────────────────────────────────────────────────
@@ -9,6 +10,7 @@ cases:
       광고 문구가 DB(campaign.body)에서 온다. 표기 규칙은 낱말 campaign 으로 켜진다. 알려진 한계(놓침): 야간
       규칙은 '(광고)' 표시가 파일에 있어야 켜져서 조용하다
     expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
       kr.network-act.50-4/nonemail-start-block: needs-review
       kr.network-act.50-4/nonemail-end-optout: needs-review
     ai:
@@ -59,6 +61,8 @@ cases:
       매체를 모르는 send 를 문자 발송으로 세지 않아 조용하다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: not-applicable
+      kr.network-act.50-4/nonemail-end-optout: not-applicable
     ai:
       ai-night-guard: no
   # ── 스케줄 ───────────────────────────────────────────────────────────────────
@@ -146,15 +150,35 @@ cases:
   # ── 발송을 알아보는가 ─────────────────────────────────────────────────────────────
   - file: ad-shapes/helper-bare-name.ts
     note: >
-      다른 파일의 도우미 sendKakaoMessage() 로 '(광고)' 문구를 보낸다. 야간 규칙은 켜진다. 표기 규칙은 이 호출을
+      다른 파일의 도우미 sendKakaoMessage() 로 '(광고)' 문구를 보낸다. 야간 규칙은 켜진다. 이름으로 들여온
+      (import { … }) 도우미라 Semgrep 이 모듈의 함수 호출로 풀어 주어 켜지는 것이다. 표기 규칙은 이 호출을
       문자·푸시 발송으로 세지 않아 판정하지 않는다(문구는 요건을 갖췄다)
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
     ai:
       ai-night-guard: no
+  - file: ad-shapes/helper-same-file.ts
+    note: >
+      알려진 한계(놓침). 위와 같은 호출인데 도우미를 같은 파일에 정의했다. 기본 들여오기(import x from)로 받아도
+      같다. 메서드 호출로 풀리지 않아 발송으로 세지 않는다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+  - file: ad-shapes/db-agent-insert.ts
+    note: >
+      알려진 한계(놓침). 통신사 문자 에이전트 테이블(SC_TRAN)에 INSERT 하면 에이전트가 보낸다. 발송 호출이 없어 두
+      정책 모두 조용하다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
   - file: ad-shapes/sens-axios-config.js
     note: >
-      알려진 한계(놓침). NCP SENS 를 axios({url, data}) 꼴로 부른다. 발송으로 알아보지 못한다
+      알려진 한계(놓침). NCP SENS 를 axios({url, data}) 꼴로 부르고, 주소는 서비스 id 를 끼운 템플릿을 지역 변수에
+      담았다. 둘 다 발송으로 알아보지 못한다(하나만 고쳐서는 이 기대가 바뀌지 않는다)
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+  - file: ad-shapes/sens-url-variable.js
+    note: >
+      알려진 한계(놓침). 호출은 axios.post 인데 게이트웨이 주소를 서비스 id 를 끼운 템플릿으로 지역 변수에 담았다.
+      상수 전파가 닿지 않아 발송으로 알아보지 못한다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
   - file: ad-shapes/axios-instance-baseurl.ts
@@ -175,10 +199,12 @@ cases:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
   - file: ad-shapes/wrapper-route.js
     note: >
-      '(광고)' 푸시를 다른 파일의 래퍼로 보낸다. 야간 규칙은 켜진다. 알려진 한계(놓침): 명칭·수신거부가 없는데도
+      '(광고)' 푸시를 다른 파일의 래퍼로 보낸다. 야간 규칙은 켜진다. 알려진 한계(놓침): 연락처·수신거부가 없는데도
       표기 규칙은 래퍼 호출을 푸시 발송으로 세지 않아 조용하다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
+      kr.network-act.50-4/nonemail-start-block: not-applicable
+      kr.network-act.50-4/nonemail-end-optout: not-applicable
     ai:
       ai-night-guard: no
   - file: ad-shapes/wrapper-push-helper.js
@@ -197,6 +223,8 @@ cases:
       알려진 한계(놓침). 쿠폰·할인만 있는 광고 문자. 두 낱말은 광고 낱말 목록에 없다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/nonemail-start-block: not-applicable
+      kr.network-act.50-4/nonemail-end-optout: not-applicable
   - file: ad-shapes/english-ad.ts
     note: >
       알려진 한계(놓침). 영어 광고 푸시(deal, off)
@@ -234,7 +262,8 @@ cases:
       ai-optout-free: no
   - file: ad-shapes/ad-badge-list.jsx
     note: >
-      알려진 한계(오경보). 화면의 [광고] 배지와 sendBeacon·배열 push 가 광고 발송으로 읽힌다
+      알려진 한계(오경보). 화면의 [광고] 배지와 navigator.sendBeacon 이 광고 발송으로 읽힌다(배열 push 는 이미
+      빠진다)
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: needs-review
     ai:
@@ -290,6 +319,18 @@ cases:
       ai-night-guard:
         answer: yes
         cite: 'const targets = await db.member.findMany({ where: { smsAgreed: true, allowLateHoursAd: true } });'
+  - file: ad-shapes/kst-plus9-guard.ts
+    note: >
+      UTC 로 도는 서버에서 getUTCHours() + 9 로 한국 시각을 구해 야간이면 빠져나간다. 정적 대안은 UTC 시각에서 나온
+      값을 받지 않으므로 판정자가 그 줄을 인용해야 풀린다
+    expect:
+      kr.network-act.50-3/ad-send-without-night-guard: compliant
+      kr.network-act.50-4/nonemail-start-block: compliant
+      kr.network-act.50-4/nonemail-end-optout: compliant
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: 'const kstHour = (new Date().getUTCHours() + 9) % 24;'
   - file: ad-shapes/local-hour-guard-no-tz.ts
     note: >
       알려진 한계. 시간대가 코드에 없는 getHours() 가드를 충족 근거로 본다. UTC 로 도는 서버에서는 이 가드가
@@ -304,8 +345,14 @@ cases:
       알려진 한계(놓침). Brevo SDK 로 주간 특가 메일을 보낸다. 전자우편 발송으로 알아보지 못한다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/email-subject-label: not-applicable
+      kr.network-act.50-4/email-body-sender: not-applicable
+      kr.network-act.50-4/email-body-optout: not-applicable
   - file: ad-shapes/mailer-wrapper-positional.ts
     note: >
-      알려진 한계(놓침). 자체 mailer.deliver(받는이, 제목, 본문) 로 추천 상품 메일을 보낸다
+      알려진 한계(놓침). 자체 mailer.deliver(받는이, 제목, 본문) 로 특가 상품 메일을 보낸다. 전자우편 발송으로 알아보지 못한다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/email-subject-label: not-applicable
+      kr.network-act.50-4/email-body-sender: not-applicable
+      kr.network-act.50-4/email-body-optout: not-applicable
