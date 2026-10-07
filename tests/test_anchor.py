@@ -120,6 +120,66 @@ def test_file_scope_compiles_no_region_rules(kr):
     assert any(r["id"].startswith("policypack-region") for r in compile_static(anchored(kr))["rules"])
 
 
+# ── 함수 경계는 필요한 파일에서만 구한다 ────────────────────────────────────
+
+
+def test_function_boundaries_are_computed_only_where_a_function_rule_can_apply():
+    """경계 규칙은 모든 함수에 맞는다. 모든 파일에 돌리면 광고 발송이 없는 파일까지 2~3배 느려지고, 함수가 수천
+    개인 파일은 매치 상한을 넘겨 정책 조건의 매치까지 버려졌다(검토에서 실측). 함수 단위 규칙이 걸릴 수 있는
+    파일에서만 두 번째 실행으로 구한다."""
+    pack = load_pack(KR_CORE)
+    signup = KR_CORE / "tests" / "pipa-22-2" / "violating.ts"
+    ads = KR_CORE / "tests" / "network-act-50-3" / "two-sends-one-guarded.ts"
+
+    alone = SemgrepBackend().run(compile_static(pack), [signup])
+    assert alone.runs == 1 and alone.regions == {}
+
+    both = SemgrepBackend().run(compile_static(pack), [signup, ads])
+    assert both.runs == 2
+    assert {p.resolve() for p in both.regions} == {ads.resolve()}
+
+
+def test_choosing_files_for_function_boundaries():
+    from policypack.static.backend import Match
+    from policypack.static.semgrep_cli import region_targets
+
+    def rule(pred, role=None):
+        meta = {"policy": "p", "rule": "r", "group": "applies-when", "predicate": pred}
+        return {"id": f"p.r.{pred}", "metadata": {"policypack": {**meta, **({"anchor": role} if role else {})}}}
+
+    on, wth = PredicateKey("p", "r", "applies-when", "send"), PredicateKey("p", "r", "applies-when", "ad")
+    span = Span(Pos(1, 1, 0), Pos(1, 5, 4))
+    a, b, c, d = (Path(f"/t/{n}.ts") for n in "abcd")
+    result = StaticResult(
+        matches=[Match(on, a, span), Match(wth, a, span), Match(on, b, span), Match(on, c, span), Match(wth, d, span)],
+        partial_unparsed={c: []},
+    )
+    rules = [rule("send", "on"), rule("ad", "with")]
+    # a: 두 조건이 다 맞았다. b: 판정 위치만 맞았다(규칙이 적용되지 않는다). c: 일부가 파싱되지 않아 다른 조건의
+    # '매치 없음'을 믿을 수 없다. d: 판정 위치가 없다(함수 경계가 있어도 쓸 데가 없다)
+    assert region_targets(rules, result, [a, b, c, d]) == [a, c]
+    # 표지가 없는 설정(직접 쓴 시험용 설정)은 전부 고른다
+    assert region_targets([rule("send"), rule("ad")], result, [a, b]) == [a, b]
+
+
+def test_boundaries_where_needed_give_the_same_verdicts_as_boundaries_everywhere(monkeypatch, kr):
+    """두 번에 나눠 돌려도 판정은 같다. 모든 파일에서 경계를 구하던 방식과 견준다."""
+    import policypack.static.semgrep_cli as cli_backend
+
+    pack = anchored(kr)
+    files = sorted(PROBES.iterdir()) + sorted((KR_CORE / "tests" / "network-act-50-3").iterdir())
+    targets = [Target(path=f, lang="typescript", case=f.name) for f in files]
+
+    def verdicts():
+        static = SemgrepBackend().run(compile_static(pack), [t.path for t in targets])
+        res = evaluate(pack, targets, static, judge=FakeJudge("아니오"))
+        return sorted((f.case, f.ref, f.outcome.value, f.line, f.region, tuple(f.anchor_lines)) for f in res.findings)
+
+    narrow = verdicts()
+    monkeypatch.setattr(cli_backend, "region_targets", lambda rules, result, targets: list(targets))
+    assert narrow and narrow == verdicts()
+
+
 # ── 함수가 여럿인 파일 ──────────────────────────────────────────────────────
 
 

@@ -194,6 +194,12 @@ def parse_semgrep_json(data: dict[str, Any], table: dict[str, RuleInfo] | None =
 
         path_s = err.get("path")
         rule_id = err.get("rule_id")
+        if path_s and label == "Too many matches":
+            # semgrep 은 한 파일의 매치가 상한(1.176.1: 모든 규칙을 합쳐 1만 건)을 넘으면 그 파일의 매치를 규칙과
+            # 무관하게 전부 버리고, 오류에는 규칙 하나만 적는다(실측). 그 규칙 하나가 아니라 파일 전체의
+            # '매치 없음'을 믿을 수 없다
+            result.incomplete.add(Path(path_s))
+            continue
         if path_s and rule_id and label in RULE_LEVEL_ERRORS:
             rid = str(rule_id)
             if table is not None:

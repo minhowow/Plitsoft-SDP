@@ -32,8 +32,8 @@ import time
 from pathlib import Path
 
 from policypack.errors import BackendError
-from policypack.static.backend import StaticResult
-from policypack.static.compile import LANGUAGE_GLOBS
+from policypack.static.backend import PredicateKey, StaticResult
+from policypack.static.compile import ANCHOR_ROLE, LANGUAGE_GLOBS, REGION_MARKER
 from policypack.static.parse import TIMEOUT_THRESHOLD, parse_semgrep_json, rule_table
 
 #: 시험한 판. 판이 다르면 같은 팩의 판정이 달라질 수 있어 경고한다(막지는 않는다).
@@ -271,6 +271,31 @@ def timeout_from_env() -> float:
     return t
 
 
+def region_targets(rules: list[dict], result: StaticResult, targets: list[Path]) -> list[Path]:
+    """함수 경계가 필요한 대상. 함수 단위 규칙의 판정 위치(anchor-on) 조건이 맞았고, 그 규칙의 다른 적용 조건도
+    맞았거나 그 파일에서 값을 믿을 수 없는(파싱 실패·미완) 파일이다.
+
+    넉넉하게 고른다. 빠뜨린 파일은 함수 경계가 없어 파일 단위로 판정된다 — 경고를 잃지는 않지만 함수 단위가
+    막으려던 구멍(다른 함수의 가드가 푸는 것)이 그 파일에서 다시 열린다. 표지가 없는 설정이면 전부 고른다."""
+    groups: dict[tuple[str, str], dict[str, set[PredicateKey]]] = {}
+    for r in rules:
+        meta = (r.get("metadata") or {}).get("policypack")
+        if isinstance(meta, dict) and meta.get(ANCHOR_ROLE) in ("on", "with"):
+            key = PredicateKey(meta["policy"], meta["rule"], meta["group"], meta["predicate"])
+            groups.setdefault((meta["policy"], meta["rule"]), {"on": set(), "with": set()})[meta[ANCHOR_ROLE]].add(key)
+    if not groups:
+        return list(targets)
+    index = result.index()
+    shaky = result.unreliable_paths() | result.unfinished_paths()
+    need: set[Path] = set()
+    for roles in groups.values():
+        anchored = {p for k in roles["on"] for p in index.get(k, {})}
+        for path in anchored:
+            if all(path in index.get(k, {}) or path in shaky for k in roles["with"]):
+                need.add(path)
+    return [t for t in targets if t.resolve() in need]
+
+
 class SemgrepBackend:
     name = "semgrep"
 
@@ -307,7 +332,31 @@ class SemgrepBackend:
         semgrep 은 디렉터리를 받으면 자체 규칙으로 경로를 걸러 낸다. 실측: 이름이 `test` 인
         디렉터리가 통째로 빠졌다. 무엇을 볼지는 우리가 정해야 한다. 사용자의 test 디렉터리를 말없이 건너뛰는
         법 검토 도구는 쓸모가 없다.
+
+        함수 경계 규칙이 있으면 두 번에 나눠 돈다. 먼저 정책 조건만 모든 대상에 돌리고, 함수 단위 규칙이 걸릴 수
+        있는 파일에서만 함수 경계를 구한다. 경계 규칙은 모든 함수에 맞으므로 한 번에 돌리면 광고 발송이 없는
+        파일까지 값을 치른다. 실측: 보통 코드에서 2~3배, 한 줄로 축소된 파일에서 수십 배 느렸고, 함수가 수천 개인
+        파일은 매치 상한을 넘겨 정책 조건의 매치까지 버려졌다.
         """
+        rules = config.get("rules", [])
+        region = [r for r in rules if isinstance((r.get("metadata") or {}).get(REGION_MARKER), dict)]
+        if not region:
+            return self._run_chunks(config, targets)
+        result = self._run_chunks({**config, "rules": [r for r in rules if r not in region]}, targets)
+        need = region_targets(rules, result, targets)
+        # 고르느라 만든 캐시는 버린다. 결과를 받은 쪽이 매치를 고치면(시험이 그런다) 낡은 캐시가 남는다
+        result._index = result._unreliable = result._unfinished = None
+        if need:
+            extra = self._run_chunks({**config, "rules": region}, need)
+            # 함수 경계만 가져온다. 이 실행의 파싱·시간 초과 오류는 첫 실행이 이미 적었고, 경계를 얻지 못한 파일은
+            # 파일 단위로 판정한다(parse.py 의 함수 경계 규칙 시간 초과와 같은 처리)
+            result.regions.update(extra.regions)
+            result.rule_errors.extend(extra.rule_errors)
+            result.runs += extra.runs
+            result.elapsed_s += extra.elapsed_s
+        return result
+
+    def _run_chunks(self, config: dict, targets: list[Path]) -> StaticResult:
         if len(targets) > self.CHUNK:
             merged = StaticResult(backend=self.name)
             versions: list[str] = []

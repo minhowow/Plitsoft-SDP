@@ -106,7 +106,8 @@ def test_policypack_test_says_why_everything_failed(monkeypatch, capsys):
     assert "엔진 오류 1건" in out and "경고:" in err
     main(["test", "--exit-zero", "--output-format", "json"])
     run = json.loads(capsys.readouterr().out)["run"]
-    assert run["engine_errors"] and run["engine_runs"] == 1
+    # 함수 단위 규칙이 있으면 함수 경계를 구하는 두 번째 실행이 더 있을 수 있다
+    assert run["engine_errors"] and run["engine_runs"] >= 1
 
 
 @pytest.mark.skipif(os.name == "nt", reason="chmod 000 은 POSIX 에서만 읽기를 막는다")

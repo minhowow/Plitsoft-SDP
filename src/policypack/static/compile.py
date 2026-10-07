@@ -54,23 +54,31 @@ REGION_PATTERNS: dict[str, list[str]] = {
 #: 함수 경계 규칙 매치를 가려내는 metadata 키
 REGION_MARKER = "policypack_region"
 
+#: 함수 단위 규칙의 적용 조건에 붙는 metadata 키. 값은 "on"(anchor-on 조건) 또는 "with"(나머지 적용 조건)
+ANCHOR_ROLE = "anchor"
+
 
 def region_rules(languages: set[str]) -> list[dict[str, Any]]:
-    out = []
+    """함수 경계 규칙. 패턴 목록이 같은 언어는 규칙 하나로 묶는다.
+
+    언어마다 규칙을 따로 두면 semgrep 이 javascript 규칙을 TypeScript 파일에도 돌려 함수마다 매치가 둘 나오고
+    그만큼 느려진다(실측: 함수 4,140개에 매치 7,620건)."""
+    by_patterns: dict[tuple[str, ...], list[str]] = {}
     for lang in sorted(languages):
         pats = REGION_PATTERNS.get(lang)
         if pats:
-            out.append(
-                {
-                    "id": f"policypack-region.{lang}",
-                    "languages": [lang],
-                    "severity": "INFO",
-                    "message": "region",
-                    "metadata": {REGION_MARKER: {"lang": lang}},
-                    "pattern-either": [{"pattern": p} for p in pats],
-                }
-            )
-    return out
+            by_patterns.setdefault(tuple(pats), []).append(lang)
+    return [
+        {
+            "id": "policypack-region." + "-".join(langs),
+            "languages": langs,
+            "severity": "INFO",
+            "message": "region",
+            "metadata": {REGION_MARKER: {"lang": "-".join(langs)}},
+            "pattern-either": [{"pattern": p} for p in pats],
+        }
+        for pats, langs in by_patterns.items()
+    ]
 
 
 def _rule_id(policy: Policy, rule: Rule, pred_id: str, *, generic: bool) -> str:
@@ -101,6 +109,9 @@ def compile_static(pack: PolicyPack) -> dict[str, Any]:
                 if pred.static is None:
                     continue
                 meta = {"policy": policy.id, "rule": rule.id, "group": group, "predicate": pred.id}
+                if rule.scope is Scope.ANCHOR and group == GROUP_APPLIES:
+                    # 함수 경계가 필요한 파일을 고르는 데 쓴다(백엔드). 판정 위치 조건은 "on", 나머지 적용 조건은 "with"
+                    meta[ANCHOR_ROLE] = "on" if pred.id == rule.anchor_on else "with"
                 rules.append(
                     {
                         "id": _rule_id(policy, rule, pred.id, generic=False),

@@ -210,11 +210,20 @@ def test_timeouts_at_the_threshold_leave_the_whole_file_unfinished():
     assert res.incomplete == {Path("/t/messages.js")}
 
 
-@pytest.mark.parametrize("label", ["Too many matches", "Stack overflow", "Fixpoint timeout", "Internal matching error"])
+@pytest.mark.parametrize("label", ["Stack overflow", "Fixpoint timeout", "Internal matching error"])
 def test_other_rule_level_errors_leave_their_predicate_unfinished(label):
     err = {**_timeout("tmp.kr.p.r.pred"), "type": label}
     res = parse_semgrep_json({"results": [], "errors": [err]}, _table())
     assert res.predicate_timeouts == {Path("/t/messages.js"): [PRED]} and res.rule_errors == []
+
+
+@pytest.mark.parametrize("rule_id", ["tmp.kr.p.r.pred", "private.tmp.x.policypack-region.typescript"])
+def test_too_many_matches_leaves_the_whole_file_unfinished(rule_id):
+    """매치 상한을 넘으면 semgrep 은 그 파일의 매치를 모든 규칙에서 버리고 오류에는 규칙 하나만 적는다(실측,
+    1.176.1). 그 규칙의 조건만 '모름'으로 두면 다른 정책이 그 파일에서 경고 없이 지나간다."""
+    err = {**_timeout(rule_id), "type": "Too many matches"}
+    res = parse_semgrep_json({"results": [], "errors": [err]}, _table())
+    assert res.incomplete == {Path("/t/messages.js")}
 
 
 def test_semgrep_prefixes_rule_ids_with_the_config_folder(tmp_path, monkeypatch):
