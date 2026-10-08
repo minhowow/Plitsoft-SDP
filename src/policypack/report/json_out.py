@@ -49,7 +49,8 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             # findings[].file 과 맞춰 볼 수 있게 같은 기준으로 낸다
             "unparsed": [_rel(p, root) for p in result.unparsed],
             "skipped": [_rel(p, root) for p in result.skipped],
-            # 엔진이 정책 조건을 끝까지 돌리지 못한 파일(파싱 실패와 다르다)과, 어느 파일인지 모르는 엔진 오류
+            # 엔진이 정책 조건을 끝까지 돌리지 못했거나 함수 경계를 얻지 못한 파일(파싱 실패와 다르다)과, 어느
+            # 파일인지 모르는 엔진 오류
             "incomplete": [_rel(p, root) for p in result.incomplete],
             "engine_errors": list(result.engine_errors),
             "coverage_complete": result.coverage_complete,

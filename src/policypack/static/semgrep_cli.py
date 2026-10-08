@@ -276,8 +276,8 @@ def region_targets(rules: list[dict], result: StaticResult, targets: list[Path])
     하나도 '거짓'이 아닌 파일이다. '거짓'은 평가기와 같은 기준으로 본다(engine.static_value): 매치가 없고, 그
     조건이 시간 초과로 끊기지 않았고, 파싱이 안 된 파일이라면 정규식 조건(generic 사본이 있는 것)일 때.
 
-    엔진이 끝내지 못한 파일은 고르지 않는다. 그 파일은 조건이 전부 '모름'이라 어차피 '불확실'이고, 끝내지 못한
-    파일은 대개 한 줄로 축소된 큰 파일이라 경계 규칙이 가장 오래 걸리는 곳이다(실측: 130KB 두 개에 100초).
+    엔진이 끝내지 못한 파일도 같은 기준으로 고른다. 그런 파일에서 매치가 없는 조건은 '모름'이지만 맞은 조건은
+    그대로 참이라, 파일 단위로 두면 다른 함수의 가드가 이 발송의 경고를 푼다(검토에서 실측).
     고르지 않은 파일은 함수 경계가 없어 파일 단위로 판정된다. 표지가 없는 설정이면 전부 고른다."""
     groups: dict[tuple[str, str], dict[str, set[PredicateKey]]] = {}
     regex_only: set[PredicateKey] = set()
@@ -294,17 +294,16 @@ def region_targets(rules: list[dict], result: StaticResult, targets: list[Path])
         return list(targets)
     index = result.index()
     unreliable = result.unreliable_paths()
-    unfinished = result.unfinished_index()
 
     def not_false(key: PredicateKey, path: Path) -> bool:
-        if path in index.get(key, {}) or key in unfinished.get(path, ()):
+        if path in index.get(key, {}) or result.unfinished(key, path):
             return True
         return path in unreliable and key not in regex_only
 
     need: set[Path] = set()
     for roles in groups.values():
         anchored = {p for k in roles["on"] for p in index.get(k, {})}
-        need |= {p for p in anchored - unfinished[None] if all(not_false(k, p) for k in roles["with"])}
+        need |= {p for p in anchored if all(not_false(k, p) for k in roles["with"])}
     return [t for t in targets if t.resolve() in need]
 
 
@@ -360,13 +359,21 @@ class SemgrepBackend:
         result._index = result._unreliable = result._unfinished = None
         if need:
             extra = self._run_chunks({**config, "rules": region}, need)
-            # 함수 경계만 가져온다. 이 실행의 파싱·시간 초과 오류는 첫 실행이 이미 적었고, 경계를 얻지 못한 파일은
-            # 파일 단위로 판정한다(parse.py 의 함수 경계 규칙 시간 초과와 같은 처리)
+            # 함수 경계를 가져온다. 파싱 오류는 첫 실행이 이미 적었다. 이 실행에서만 나는 실패(경계 규칙의 시간
+            # 초과·매치 상한, 건너뛴 파일, 어느 파일인지 모르는 오류)는 따로 적는다 — 정책 조건의 값은 그대로이고
+            # 그 파일의 함수 경계만 없다. 평가기는 그런 파일의 함수 단위 규칙을 '충족'으로 풀지 않는다
             result.regions.update(extra.regions)
             result.rule_errors.extend(extra.rule_errors)
+            result.unlocated_errors.extend(extra.unlocated_errors)
+            result.regions_failed |= extra.incomplete | set(extra.rule_timeouts)
             result.runs += extra.runs
             result.elapsed_s += extra.elapsed_s
         return result
+
+    def run_all_rules(self, config: dict, targets: list[Path]) -> StaticResult:
+        """설정의 규칙을 나누지 않고 전부 엔진에 넘긴다. 규칙을 엔진이 받는지 볼 때 쓴다(validate) — `run` 은
+        함수 단위 규칙이 걸리는 파일이 없으면 함수 경계 규칙을 엔진에 넘기지 않는다."""
+        return self._run_chunks(config, targets)
 
     def _run_chunks(self, config: dict, targets: list[Path]) -> StaticResult:
         if len(targets) > self.CHUNK:

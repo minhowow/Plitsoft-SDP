@@ -155,8 +155,8 @@ def test_pack_rule_timeout_distrusts_the_file():
 
 
 def test_timeouts_at_the_threshold_distrust_the_file():
-    """시간 초과가 세 번 나면 semgrep 이 나머지 규칙을 오류 없이 건너뛴다(실측). 함수 경계 규칙의 시간 초과는
-    하나로는 파일을 믿지 않을 까닭이 아니지만, 문턱에 닿으면 정책 조건도 건너뛰었다."""
+    """시간 초과가 세 번 나면 semgrep 이 그 파일의 언어 규칙 결과를 오류 없이 전부 버린다(실측). 함수 경계 규칙의
+    시간 초과는 하나로는 파일을 믿지 않을 까닭이 아니지만, 문턱에 닿으면 정책 조건의 결과도 사라진다."""
     errs = [_timeout("policypack-region.typescript")] * 3
     res = parse_semgrep_json({"results": [], "errors": errs})
     assert res.hard_unparsed == {Path("/t/messages.js")}

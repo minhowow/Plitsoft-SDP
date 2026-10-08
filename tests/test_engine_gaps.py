@@ -103,7 +103,9 @@ def test_policypack_test_says_why_everything_failed(monkeypatch, capsys):
     _inject(monkeypatch, lambda config, targets: [{"type": "Timeout", "level": "error", "message": "t"}])
     main(["test", "--exit-zero", "--no-color"])
     out, err = capsys.readouterr()
-    assert "엔진 오류 1건" in out and "경고:" in err
+    # 오류는 엔진을 부를 때마다 넣는다. 끝내지 못한 파일도 함수 경계를 구하므로 엔진을 두 번 부르고, 두 번째
+    # 실행의 오류도 버리지 않는다. 1건이면 둘 중 하나가 빠진 것이다
+    assert "엔진 오류 2건" in out and "경고:" in err
     main(["test", "--exit-zero", "--output-format", "json"])
     run = json.loads(capsys.readouterr().out)["run"]
     # 함수 단위 규칙이 있으면 함수 경계를 구하는 두 번째 실행이 더 있을 수 있다

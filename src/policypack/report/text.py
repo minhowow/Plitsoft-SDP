@@ -29,7 +29,7 @@ LABEL = {
 
 UNTESTED_WHY = {
     "parse-error": "파일을 파싱하지 못했습니다",
-    "engine-incomplete": "엔진이 이 파일에서 규칙을 끝내지 못했습니다",
+    "engine-incomplete": "엔진이 이 파일에서 규칙을 끝내지 못했거나 함수 경계를 얻지 못했습니다",
     "no-judge": "AI 에게 물어야 할 곳인데 판정자가 꺼져 있습니다(--judge)",
     "judge-unavailable": "판정자를 부르지 못했습니다",
     "judge-unparseable": "판정자의 답을 쓸 수 없었습니다(형식 오류·격리 위반·예/아니오가 아닌 답)",
@@ -213,8 +213,8 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path 
         names = ", ".join(rel(p, root) for p in result.incomplete[:3])
         more = f" 외 {len(result.incomplete) - 3}개" if len(result.incomplete) > 3 else ""
         gaps.append(
-            f"  엔진이 규칙을 끝내지 못한 파일 {len(result.incomplete)}개({names}{more}) — 시간 초과·메모리 부족 등. "
-            f"끝나지 않은 조건은 '불확실'로 남았습니다"
+            f"  엔진이 끝내지 못한 파일 {len(result.incomplete)}개({names}{more}) — 정책 조건을 끝까지 돌리지 못했거나 "
+            f"함수 경계를 얻지 못했습니다(시간 초과·매치 상한 등). 그 파일의 판정은 '불확실'로 남았을 수 있습니다"
         )
     if result.engine_errors:
         gaps.append(f"  엔진 오류 {len(result.engine_errors)}건(어느 파일인지 모름): {result.engine_errors[0][:120]}")

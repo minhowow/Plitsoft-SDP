@@ -157,7 +157,8 @@ def _check_static(pack) -> None:
 
     Semgrep 은 설정을 읽을 때 모든 규칙의 오류를 낸다(대상의 언어와 무관, 1.176.1 실측). 빈 파일 하나를 대상으로 준다.
     대상 없이 부르면 작업 폴더를 검사한다. 이게 없으면 Semgrep 이 거절할 팩에 '문법에 맞습니다'라고 답했다(실측:
-    괄호가 빠진 정규식·패턴, 없는 언어 이름).
+    괄호가 빠진 정규식·패턴, 없는 언어 이름). 검사 때와 달리 규칙을 나누지 않고 한 번에 넘긴다 — 빈 파일에는
+    함수 단위 규칙이 걸리지 않아, 나눠 돌리면 함수 경계 규칙이 엔진에 가지 않는다.
     """
     import tempfile
 
@@ -167,7 +168,7 @@ def _check_static(pack) -> None:
     with tempfile.TemporaryDirectory(prefix="policypack-validate-") as d:
         probe = Path(d) / "probe.txt"
         probe.write_text("", encoding="utf-8")
-        SemgrepBackend().run(compile_static(pack), [probe]).check_rules()
+        SemgrepBackend().run_all_rules(compile_static(pack), [probe]).check_rules()
 
 
 # ── schema ──────────────────────────────────────────────────────────────────
@@ -343,7 +344,9 @@ def _warn_engine_errors(engine: str, errors: list[str]) -> None:
     if errors:
         print(
             f"경고: {engine or '정적 엔진'} 이 어느 파일인지 밝히지 않은 오류 {len(errors)}건을 냈습니다"
-            f"({errors[0][:120]}). 그 실행의 대상 파일은 모든 정적 조건을 '모름'으로 둡니다.",
+            f"({errors[0][:120]}). 그 실행의 대상 파일은 끝내지 못한 것으로 봅니다 — 정책 조건을 돌리던 실행이면 "
+            f"매치가 없는 정적 조건이 '모름'이 되고, 함수 경계를 구하던 실행이면 경계를 얻지 못한 파일의 함수 단위 "
+            f"규칙을 '충족'으로 풀지 않습니다.",
             file=sys.stderr,
         )
 

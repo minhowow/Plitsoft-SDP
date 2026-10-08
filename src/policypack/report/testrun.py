@@ -80,7 +80,9 @@ def render(run: TestRun, root, explain: bool = False, color: bool | None = None,
         out.append(
             st.warn(
                 f"엔진 오류 {len(run.engine_errors)}건(어느 파일인지 모름): {run.engine_errors[0][:120]} — "
-                f"그 실행의 픽스처는 모든 정적 조건이 '모름'이 됐습니다. 실패의 원인이 규칙이 아닐 수 있습니다."
+                f"그 실행의 픽스처는 끝내지 못한 것으로 봤습니다(정책 조건 실행이면 매치가 없는 정적 조건이 '모름', "
+                f"함수 경계 실행이면 경계를 잃은 픽스처의 함수 단위 규칙을 '충족'으로 풀지 않음). "
+                f"실패의 원인이 규칙이 아닐 수 있습니다."
             )
         )
     if pack_path is not None:

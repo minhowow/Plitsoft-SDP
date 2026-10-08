@@ -82,6 +82,10 @@ class Unit:
     """이 구역 안에서 anchor-on 조건이 맞은 자리. 같은 구역의 앵커는 판정이 같을 수밖에 없어 묶는다."""
     outside: list[Span] = field(default_factory=list)
     """함수 밖(모듈 최상위) 구역이면 제외할 함수 span 들. 비어 있으면 함수 밖 구역이 아니다."""
+    boundaries_lost: UntestedReason | None = None
+    """함수 단위 규칙의 단위가 함수 구역이 아닌데(파일 전체, 함수 밖) 이 파일의 함수 경계를 믿을 수 없는 까닭.
+    경계 실행이 실패했으면 ENGINE_INCOMPLETE, 파일이 다 파싱되지 않았으면 PARSE_ERROR 다. 이런 단위는 대안
+    (정적 매치든 AI 인용이든)으로 '충족'이라 하지 않는다 — 엔진이 되찾지 못한 다른 함수의 가드일 수 있다."""
 
     @property
     def top_level(self) -> bool:
@@ -461,7 +465,8 @@ class EvalResult:
     skipped: list[str] = field(default_factory=list)
     """검사하지 않은 파일(까닭은 discover.SKIPPED_REASONS)."""
     incomplete: list[str] = field(default_factory=list)
-    """엔진이 정책 조건을 끝까지 돌리지 못한 판정 대상 파일(시간 초과·메모리 부족 등). 파싱 실패와 다르다."""
+    """엔진이 정책 조건을 끝까지 돌리지 못했거나(시간 초과·메모리 부족 등) 함수 단위 규칙에 쓸 함수 경계를
+    구하지 못한 판정 대상 파일. 파싱 실패와 다르다."""
     engine_errors: list[str] = field(default_factory=list)
     """엔진이 어느 파일인지 밝히지 않은 오류의 원문. 그 실행의 대상은 `incomplete` 에 들어 있다."""
 
@@ -527,6 +532,12 @@ def static_value_in(
 def _covered(line: int, functions: list[Span]) -> bool:
     return any(f.start.line <= line <= f.end.line for f in functions)
 
+
+#: 함수 구역이 아닌 단위에서 함수 경계를 믿을 수 없는 까닭을 판정 경로에 적는 말
+_BOUNDARIES_LOST = {
+    UntestedReason.ENGINE_INCOMPLETE: "함수 경계를 얻지 못함",
+    UntestedReason.PARSE_ERROR: "파싱되지 않은 곳이 있어 함수 경계를 믿지 못함",
+}
 
 #: 함수 밖(모듈 최상위) 앵커의 구역. 함수 안 앵커와 함께 있을 때만 쓴다.
 TOP_LEVEL = "top-level"
@@ -594,6 +605,7 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
     unfinished = static.unfinished_paths()
     # 파일마다 훑으면 파일 수의 제곱이 된다. 한 번만 만든다
     regions_by_path = {k.resolve(): v for k, v in static.regions.items()}
+    lost = {p.resolve() for p in static.regions_failed}
 
     # ── 1. 적용 판단 (정적) ────────────────────────────────────────────────
     units: list[Unit] = []
@@ -646,12 +658,22 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
                     )
                     for p in rule.compliant_if_any
                 ]
+                # 함수 구역이 아닌 단위는 함수 경계를 믿을 수 있을 때만 푼다. 경계 실행이 실패했거나 파일이 다
+                # 파싱되지 않았으면, 이 자리를 감싸는 함수를 엔진이 되찾지 못했을 수 있다(검토에서 실측: 함수 머리가
+                # 파싱되지 않은 파일에서 다른 함수의 가드가 풀었다). 되찾은 함수 구역은 그대로 판정한다
+                boundaries_lost = None
+                if anchor_spans and region is None:
+                    if target.path.resolve() in lost:
+                        boundaries_lost = UntestedReason.ENGINE_INCOMPLETE
+                    elif target.path.resolve() in unreliable:
+                        boundaries_lost = UntestedReason.PARSE_ERROR
                 where = ""
                 if rule.scope is Scope.ANCHOR:
                     if region:
                         where = f" [구역 {region.start.line}~{region.end.line}행]"
                     else:
-                        where = " [구역 함수 밖]" if outside else " [구역 파일 전체]"
+                        where = " [구역 함수 밖" if outside else " [구역 파일 전체"
+                        where += f" — {_BOUNDARIES_LOST[boundaries_lost]}]" if boundaries_lost else "]"
                 unit = Unit(
                     policy=policy,
                     rule=rule,
@@ -663,6 +685,7 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
                     region=region,
                     anchors=anchor_spans,
                     outside=outside,
+                    boundaries_lost=boundaries_lost,
                 )
                 if target.path.resolve() in unfinished and applies is UNKNOWN:
                     unit.add_reason(UntestedReason.ENGINE_INCOMPLETE)
@@ -819,6 +842,11 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
         considered = considered_values(u.alts, [v for _, _, v in u.ai_alts], u.answered)
         compliant = or3(considered) if considered else FALSE
         outcome = decide(u.applies, compliant)
+        if outcome is Outcome.COMPLIANT and u.boundaries_lost:
+            # 맞은 대안이 이 발송을 감싸는 함수의 것인지 알 수 없다. 대안이 하나도 없을 때의 '검토 필요'는 그대로 둔다
+            outcome = Outcome.NEEDS_REVIEW_UNCERTAIN
+            u.add_reason(u.boundaries_lost)
+            u.trace.append(f"{_BOUNDARIES_LOST[u.boundaries_lost]} — 다른 함수의 대안일 수 있어 풀지 않음")
         u.trace.append(f"→ {outcome.value}")
 
         if outcome is Outcome.COMPLIANT:
@@ -925,8 +953,9 @@ def _match_lines(u: Unit, pred: Predicate, static: StaticResult) -> list[int]:
 
 
 def _unfinished_targets(targets: list[Target], static: StaticResult) -> list[str]:
-    """엔진이 조건을 끝내지 못한 판정 대상 파일. 대상이 받은 경로 그대로(보고서가 상대 경로로 바꾼다)."""
-    unfinished = static.unfinished_paths()
+    """엔진이 조건을 끝내지 못했거나 함수 경계를 구하지 못한 판정 대상 파일. 대상이 받은 경로 그대로(보고서가
+    상대 경로로 바꾼다)."""
+    unfinished = static.unfinished_paths() | {p.resolve() for p in static.regions_failed}
     return sorted({str(t.path) for t in targets if t.path.resolve() in unfinished})
 
 

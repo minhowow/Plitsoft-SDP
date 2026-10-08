@@ -22,8 +22,10 @@
 
 `Timeout` 오류에는 `rule_id` 가 붙는다. 그 규칙이 그 파일에서 끝나지 않았다는 뜻이지
 파일을 못 읽었다는 뜻이 아니다. 그래서 시간 초과가 난 정책 조건만 '모름'으로 둔다. 한 파일에서
-시간 초과가 `TIMEOUT_THRESHOLD` 번 나면 semgrep 이 **나머지 규칙을 오류 없이 건너뛰므로**(실측)
-그때는 파일 전체를 믿지 않는다. 함수 경계 규칙의 시간 초과는 그 파일을 파일 단위로 판정하게 할 뿐이다.
+시간 초과가 `TIMEOUT_THRESHOLD` 번 나면 semgrep 이 그 파일의 **언어 규칙 결과를 오류 없이 전부 버리므로**
+(실측: 금방 끝난 규칙의 매치도 사라지고 generic 사본의 결과만 남는다) 그때는 파일 전체를 믿지 않는다.
+함수 경계 규칙의 시간 초과는 정책 조건의 값을 바꾸지 않는다. 그 파일의 함수 경계만 없다(백엔드가
+`regions_failed` 에 적고, 평가기는 그 파일의 함수 단위 규칙을 '충족'으로 풀지 않는다).
 """
 
 from __future__ import annotations
@@ -57,7 +59,7 @@ FILE_LEVEL_ERRORS = (
     | {"Fatal error", "Timeout during interfile analysis", "OOM during interfile analysis"}
 )
 
-#: semgrep 의 --timeout-threshold 기본값. 한 파일에서 이만큼 시간 초과가 나면 나머지 규칙을 건너뛴다.
+#: semgrep 의 --timeout-threshold 기본값. 한 파일에서 이만큼 시간 초과가 나면 그 파일의 언어 규칙 결과가 전부 사라진다.
 TIMEOUT_THRESHOLD = 3
 
 
@@ -108,7 +110,7 @@ def _canonical_ids_in(text: str, known) -> str:
 
 
 def _is_region_rule(rule_id: str) -> bool:
-    # 함수 경계 규칙이 시간 초과로 끝나면 그 파일은 구역이 없는 것(파일 전체)이 될 뿐이다
+    # 함수 경계 규칙의 시간 초과는 파일을 믿지 않을 까닭이 아니다. 경계를 잃은 것은 백엔드가 regions_failed 에 적는다
     return rule_id.startswith("policypack-region") or ".policypack-region" in rule_id
 
 
@@ -240,7 +242,7 @@ def parse_semgrep_json(data: dict[str, Any], table: dict[str, RuleInfo] | None =
             continue
         infos = [info_of.get(r) for r in rules]
         if len(rules) >= TIMEOUT_THRESHOLD or any(i is None for i in infos):
-            # 문턱에 닿으면 semgrep 이 나머지 규칙을 오류 없이 건너뛴다(실측). 모르는 규칙도 같이 다룬다
+            # 문턱에 닿으면 semgrep 이 그 파일의 언어 규칙 결과를 오류 없이 버린다(실측). 모르는 규칙도 같이 다룬다
             result.incomplete.add(path)
         keys = [i.key for i in infos if i is not None and i.kind == KIND_POLICY and i.key is not None]
         if keys:

@@ -382,6 +382,20 @@ def test_validate_runs_the_static_conditions_through_the_engine(tmp_path, capsys
         assert " in rule p1.r1." in err
 
 
+def test_validate_also_runs_the_function_boundary_rule_through_the_engine(monkeypatch, capsys):
+    """검사는 함수 단위 규칙이 걸리는 파일이 있을 때만 함수 경계 규칙을 엔진에 넘긴다. validate 가 같은 길을 타면
+    빈 파일 하나로는 경계 규칙이 엔진에 가지 않아, 엔진이 거절할 경계 패턴을 통과시켰다(검토에서 실측)."""
+    from policypack.cli import main
+    from policypack.static import compile as compile_mod
+
+    assert main(["validate", str(KR_CORE)]) == 0
+    capsys.readouterr()
+    broken = {lang: ["function $F(( { ... }"] for lang in compile_mod.REGION_PATTERNS}
+    monkeypatch.setattr(compile_mod, "REGION_PATTERNS", broken)
+    assert main(["validate", str(KR_CORE)]) == 2
+    assert "정적 조건이 잘못됐습니다" in capsys.readouterr().err
+
+
 def test_validate_warns_about_languages_a_folder_scan_never_selects(tmp_path, capsys):
     """Semgrep 이 아는 언어여도(rust) 폴더 검사는 그 파일을 고르지 않는다. 팩이 조용히 아무것도 검사하지 않았다."""
     from policypack.cli import main

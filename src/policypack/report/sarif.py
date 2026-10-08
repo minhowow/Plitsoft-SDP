@@ -204,7 +204,7 @@ def _gaps(result: EvalResult, root: Path | None) -> list[dict]:
     unparsed = "파싱하지 못했습니다. 이 파일의 구문 조건은 확인되지 않았습니다."
     out = [note("unparsed", p, unparsed) for p in result.unparsed]
     out += [note("skipped", p, f"검사하지 않았습니다({SKIPPED_REASONS}).") for p in result.skipped]
-    incomplete = "엔진이 이 파일에서 정책 조건을 끝내지 못했습니다(시간 초과 등). 파일 문법 문제가 아닙니다."
+    incomplete = "엔진이 이 파일에서 정책 조건을 끝내지 못했거나 함수 경계를 얻지 못했습니다(시간 초과 등)."
     out += [note("engine-incomplete", p, incomplete) for p in result.incomplete]
     if result.ai_pending:
         from policypack.report.text import pending_note

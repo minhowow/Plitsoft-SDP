@@ -372,7 +372,7 @@ class TestRun:
     engine_runs: int = 1
     """엔진을 부른 횟수. 픽스처가 많으면 나눠 부른다."""
     engine_errors: list[str] = field(default_factory=list)
-    """엔진이 어느 파일인지 밝히지 않은 오류. 있으면 그 실행의 픽스처는 전부 '모름' 쪽으로 기운다 —
+    """엔진이 어느 파일인지 밝히지 않은 오류. 있으면 그 실행의 픽스처는 끝내지 못한 것으로 판정된다 —
     대량 실패의 원인이 규칙이 아니라 엔진이라는 것을 알려야 한다."""
 
     @property
@@ -400,7 +400,8 @@ def outcome_table(pack: PolicyPack, fixtures: list[Fixture], result: EvalResult)
 
 
 def run(pack: PolicyPack, fixtures: list[Fixture], backend, coverage_scope: set[str] | None = None) -> TestRun:
-    """모든 픽스처를 합쳐 semgrep 을 한 번 돌리고 evaluate 를 한 번 부른다. 판정자는 늘 스텁이다."""
+    """모든 픽스처를 합쳐 정적 백엔드를 한 번 부르고(함수 경계가 필요하면 semgrep 은 두 번 돈다) evaluate 를
+    한 번 부른다. 판정자는 늘 스텁이다."""
     t0 = time.time()
     static = backend.run(compile_static(pack), sorted({f.path for f in fixtures}))
     static_s = time.time() - t0

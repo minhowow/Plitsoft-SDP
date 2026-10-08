@@ -33,7 +33,8 @@ class UntestedReason(str, Enum):
 
     PARSE_ERROR = "parse-error"
     ENGINE_INCOMPLETE = "engine-incomplete"
-    """엔진이 이 파일에서 규칙을 끝내지 못했다(시간 초과·메모리 부족 등). 파일 문법 문제가 아니다."""
+    """엔진이 이 파일에서 규칙을 끝내지 못했거나 함수 경계를 얻지 못했다(시간 초과·메모리 부족 등). 파일 문법
+    문제가 아니다."""
     NO_JUDGE = "no-judge"
     """AI 에게 물어야 할 곳인데 판정자가 꺼져 있다(기본값 --judge none)."""
     JUDGE_UNAVAILABLE = "judge-unavailable"

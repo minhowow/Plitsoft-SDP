@@ -161,12 +161,289 @@ def test_choosing_files_for_function_boundaries():
     rules = [rule("send", "on"), rule("ad", "with")]
     # a: 두 조건이 다 맞았다. b: 판정 위치만 맞았다(규칙이 적용되지 않는다). c: 일부가 파싱되지 않아 구문 조건의
     # '매치 없음'을 믿을 수 없다. d: 판정 위치가 없다(함수 경계가 있어도 쓸 데가 없다). e: 엔진이 끝내지 못한
-    # 파일은 고르지 않는다. f: 다른 조건이 시간 초과로 끊겼다('모름')
-    assert region_targets(rules, result, [a, b, c, d, e, f]) == [a, c, f]
+    # 파일인데 두 조건이 맞았다 — 맞은 조건은 참이라 함수마다 판정해야 한다. f: 다른 조건이 시간 초과로 끊겼다('모름')
+    assert region_targets(rules, result, [a, b, c, d, e, f]) == [a, c, e, f]
     # 다른 조건이 정규식 조건(generic 사본이 있다)이면 파싱이 안 된 파일에서도 '매치 없음'이 거짓이다
-    assert region_targets([*rules, rule("ad", "with", generic=True)], result, [a, b, c, d, e, f]) == [a, f]
+    assert region_targets([*rules, rule("ad", "with", generic=True)], result, [a, b, c, d, e, f]) == [a, e, f]
     # 표지가 없는 설정(직접 쓴 시험용 설정)은 전부 고른다
     assert region_targets([rule("send"), rule("ad")], result, [a, b]) == [a, b]
+
+
+SELECTION_PACK = """\
+apiVersion: policypack/v0.3
+pack: {id: t, title: t}
+defaults: {languages: [javascript, typescript]}
+policies:
+  - id: p
+    category: c
+    title: t
+    rules:
+      - id: r
+        scope: anchor
+        anchor-on: send
+        applies-when:
+          - {id: send, static: {pattern: $X.send(...)}}
+%s
+        compliant-if-any:
+          - {id: guard, static: {pattern: "if ($H >= 21) { ... }"}}
+"""
+SELECTION_WITH = {
+    "syntax": "          - {id: ad, static: {pattern: 'ad($A)'}}",
+    "regex": "          - {id: ad, static: {pattern-regex: 광고}}",
+    "none": "",
+}
+
+
+@pytest.mark.parametrize("kind", ["syntax", "regex", "none"])
+def test_boundaries_are_chosen_exactly_where_the_evaluator_builds_function_units(tmp_path, kind):
+    """손으로 적은 목록은 고르는 기준이 평가기와 어긋나도 모른다(검토에서 실측: 끝내지 못한 파일을 빼던 기준이
+    그 목록에 그대로 적혀 있었다). 기대값을 평가기에서 끌어낸다 — 판정 위치가 있는 단위가 생기는 파일이 곧
+    함수 경계가 필요한 파일이다. 다른 적용 조건이 구문 조건일 때, 정규식 조건일 때, 없을 때를 다 본다."""
+    from policypack.static.backend import Match
+    from policypack.static.semgrep_cli import region_targets
+
+    (tmp_path / "pack.yaml").write_text(SELECTION_PACK % SELECTION_WITH[kind], encoding="utf-8")
+    pack = load_pack(tmp_path)
+    on, wth = PredicateKey("p", "r", "applies-when", "send"), PredicateKey("p", "r", "applies-when", "ad")
+    span = Span(Pos(1, 1, 0), Pos(1, 5, 4))
+    a, b, c, d, e, f, g = (Path(f"/t/{n}.ts") for n in "abcdefg")
+    result = StaticResult(
+        matches=[Match(on, p, span) for p in (a, b, c, e, f, g)]
+        + ([Match(wth, p, span) for p in (a, d, e)] if kind != "none" else []),
+        partial_unparsed={c: []},
+        incomplete={e, g},  # e: 두 조건이 다 맞았다. g: 판정 위치만 맞았다(다른 조건은 '모름')
+        predicate_timeouts={f: [wth]},
+    )
+    targets = [Target(path=p, lang="typescript") for p in (a, b, c, d, e, f, g)]
+    units = evaluate(pack, targets, result).units
+    wanted = [t.path for t in targets if any(u.anchors for u in units if u.target is t)]
+    assert wanted and region_targets(compile_static(pack)["rules"], result, [t.path for t in targets]) == wanted
+
+
+def test_function_boundaries_for_a_relative_target(monkeypatch):
+    """대상을 상대 경로로 받아도 고른다. 매치의 경로는 해석된 경로로 견준다."""
+    monkeypatch.chdir(REPO)
+    ads = Path("policies/kr-core/tests/network-act-50-3/two-sends-one-guarded.ts")
+    res = SemgrepBackend().run(compile_static(load_pack(KR_CORE)), [ads])
+    assert res.runs == 2 and {p.resolve() for p in res.regions} == {ads.resolve()}
+
+
+# ── 함수 경계를 구하지 못한 파일 ────────────────────────────────────────────
+
+NIGHT_RULE = "kr.network-act.50-3/ad-send-without-night-guard"
+TWO_SENDS = KR_CORE / "tests" / "network-act-50-3" / "two-sends-one-guarded.ts"
+
+
+def _fail_the_boundary_run(monkeypatch, kind: str) -> None:
+    """함수 경계를 구하는 실행만 실패하게 한다. 엔진이 실제로 그러듯 그 실행의 결과는 비운다."""
+    real = SemgrepBackend.raw
+
+    def raw(self, config, targets):
+        data, elapsed = real(self, config, targets)
+        if not all(r["id"].startswith("policypack-region") for r in config["rules"]):
+            return data, elapsed
+        rid = "var.folders.x.T." + config["rules"][0]["id"]
+        located = {"level": "warn", "rule_id": rid, "path": str(targets[0]), "message": "m"}
+        errors = {
+            "too-many-matches": [{**located, "type": "Too many matches"}],
+            "timeout": [{**located, "type": "Timeout"}],
+            "skipped": [],
+            "unlocated": [{"type": "Fatal error", "level": "error", "message": "boom"}],
+        }[kind]
+        scanned = [] if kind == "skipped" else (data.get("paths") or {}).get("scanned", [])
+        return {**data, "results": [], "errors": errors, "paths": {"scanned": scanned}}, elapsed
+
+    monkeypatch.setattr(SemgrepBackend, "raw", raw)
+
+
+@pytest.mark.parametrize("kind", ["too-many-matches", "timeout", "skipped", "unlocated"])
+def test_a_file_without_boundaries_is_not_cleared_by_a_guard_somewhere_in_it(monkeypatch, kind):
+    """함수 경계를 구하는 실행이 실패하면 그 파일은 한 구역이 된다. 그때 다른 함수의 야간 가드가 가드 없는
+    발송을 풀었고, 보고서에는 끝내지 못한 파일도 없었다(검토에서 실측: 함수가 1만 개를 넘는 파일, 종료 코드 0).
+    이 파일은 강한 정적 대안이 맞아 판정자에게 묻지 않는다. AI 쪽은 아래 시험이 본다."""
+    _fail_the_boundary_run(monkeypatch, kind)
+    pack = load_pack(KR_CORE)
+    static = SemgrepBackend().run(compile_static(pack), [TWO_SENDS])
+    assert static.regions == {} and static.regions_failed == {TWO_SENDS}
+    assert bool(static.unlocated_errors) == (kind == "unlocated")
+    # 정책 조건의 값은 첫 실행 그대로다
+    assert static.incomplete == set() and static.predicate_timeouts == {}
+
+    res = evaluate(pack, [Target(path=TWO_SENDS, lang="typescript")], static)
+    night = [f for f in res.findings if f.ref == NIGHT_RULE]
+    assert [(f.outcome.value, f.region) for f in night] == [("needs-review-uncertain", None)]
+    assert "engine-incomplete" in [r.value for r in night[0].untested_reasons]
+    # 판정 경로의 두 줄: 단위를 만든 자리와 풀지 않은 까닭
+    assert night[0].trace[0].endswith("[구역 파일 전체 — 함수 경계를 얻지 못함]")
+    assert "함수 경계를 얻지 못함 — 다른 함수의 대안일 수 있어 풀지 않음" in night[0].trace
+    assert not [c for c in res.static_cleared + res.ai_cleared if f"{c['policy']}/{c['rule']}" == NIGHT_RULE]
+    # 같은 파일의 파일 단위 규칙은 그대로 판정한다
+    assert sorted(c["rule"] for c in res.static_cleared) == ["nonemail-end-optout", "nonemail-start-block"]
+    assert res.incomplete == [str(TWO_SENDS)] and res.coverage_complete is False
+    assert bool(res.engine_errors) == (kind == "unlocated")
+
+
+#: 정적 대안으로는 풀리지 않고 판정자의 '예'로만 풀리는 픽스처와 그 인용
+AI_CLEARED_FIXTURES = {
+    "ai-night-guard.ts": "if (!isDaytimeInSeoul(new Date())) return deferUntilMorning(campaign);",
+    "night-consent-field.ts": (
+        "const targets = await db.member.findMany({ where: { marketingAgreed: true, nightConsent: true } });"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(AI_CLEARED_FIXTURES))
+def test_an_ai_citation_does_not_clear_a_file_without_boundaries(monkeypatch, name):
+    """한 구역짜리 단위는 파일 어디의 인용이든 받는다. 함수 경계를 잃은 파일에서 AI 의 '예'가 그대로 풀면 다른
+    함수의 가드를 인용한 답이 경고를 없앤다. 위 시험의 파일은 판정자에게 묻지 않아 이 길을 타지 않는다(검토)."""
+    f = KR_CORE / "tests" / "network-act-50-3" / name
+    pack = load_pack(KR_CORE)
+    judge = FakeJudge("예", evidence=AI_CLEARED_FIXTURES[name])
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static, judge=judge)
+    # 견줄 기준: 함수 경계가 있으면 그 인용이 경고를 푼다
+    assert [c["rule"] for c in res.ai_cleared] == ["ad-send-without-night-guard"] and judge.asked
+
+    _fail_the_boundary_run(monkeypatch, "timeout")
+    judge = FakeJudge("예", evidence=AI_CLEARED_FIXTURES[name])
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    assert static.regions_failed == {f}
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static, judge=judge)
+    assert [q.predicate for q in judge.asked if q.rule == "ad-send-without-night-guard"]
+    night = [x for x in res.findings if x.ref == NIGHT_RULE]
+    assert [x.outcome.value for x in night] == ["needs-review-uncertain"] and not res.ai_cleared
+
+
+@pytest.mark.parametrize("kind", ["skipped", "unlocated"])
+def test_a_relative_target_without_boundaries_is_not_cleared(monkeypatch, kind):
+    """실패한 파일은 해석된 경로로 견준다. 대상을 상대 경로로 받아도 풀지 않고, 받은 경로 그대로 보고한다."""
+    monkeypatch.chdir(REPO)
+    rel = Path("policies/kr-core/tests/network-act-50-3/two-sends-one-guarded.ts")
+    _fail_the_boundary_run(monkeypatch, kind)
+    pack = load_pack(KR_CORE)
+    static = SemgrepBackend().run(compile_static(pack), [rel])
+    res = evaluate(pack, [Target(path=rel, lang="typescript")], static)
+    assert [f.outcome.value for f in res.findings if f.ref == NIGHT_RULE] == ["needs-review-uncertain"]
+    assert res.incomplete == [str(rel)]
+
+
+#: 함수 머리가 파싱되지 않아 엔진이 함수를 되찾지 못하는 파일(클래스 밖에 적은 메서드 둘)
+LOST_HEADERS = """import { sms } from "./sms";
+
+  async sendCoupon(to: string) {
+    const hour = new Date().getHours();
+    if (hour >= 21 || hour < 8) return;
+    await sms.send({ to, text: "(광고) 가나다몰 02-123-4567 쿠폰 도착 무료거부 080-123-4567" });
+  }
+
+  async sendMidnightDeal(to: string) {
+    await sms.send({ to, text: "자정까지 전 품목 반값" });
+  }
+"""
+
+
+RECOVERED_TAIL = "\nexport async function sendReceipt(to: string) {\n  await sms.send({ to });\n}\n"
+
+
+@pytest.mark.parametrize("tail", ["", RECOVERED_TAIL])
+def test_a_partly_parsed_file_is_not_cleared_outside_the_functions_the_engine_recovered(tmp_path, tail):
+    """경계 실행은 성공했는데 파싱되지 않은 곳이 있어 발송을 감싸는 함수가 돌아오지 않는 파일. 발송이 파일 전체
+    (또는 되찾은 함수의 밖) 한 구역으로 묶여 한 함수의 야간 가드가 다른 함수의 발송을 풀었다(검토에서 실측).
+    되찾은 함수가 하나 있어도(tail) 그 밖의 줄은 믿지 않는다."""
+    f = tmp_path / "lost-headers.ts"
+    f.write_text(LOST_HEADERS + tail, encoding="utf-8")
+    pack = load_pack(KR_CORE)
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    assert f in static.partial_unparsed and static.regions_failed == set()
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static)
+    night = [x for x in res.findings if x.ref == NIGHT_RULE and x.region is None]
+    assert [x.outcome.value for x in night] == ["needs-review-uncertain"]
+    assert "parse-error" in [r.value for r in night[0].untested_reasons]
+    assert any("파싱되지 않은 곳이 있어 함수 경계를 믿지 못함 — 다른 함수의" in line for line in night[0].trace)
+    assert not [c for c in res.static_cleared if f"{c['policy']}/{c['rule']}" == NIGHT_RULE]
+    assert res.unparsed == [str(f)]
+
+
+def test_a_recovered_function_in_a_partly_parsed_file_is_judged_as_usual(tmp_path):
+    """파싱되지 않은 곳이 있어도 엔진이 되찾은 함수 구역은 그대로 판정한다. 그 함수 안의 가드는 그 발송을 푼다."""
+    f = tmp_path / "partly.ts"
+    f.write_text(
+        'import { sms } from "./sms";\n\nconst broken = @@@ ;\n\n'
+        "export async function sendCoupon(to: string) {\n"
+        "  const hour = new Date().getHours();\n"
+        "  if (hour >= 21 || hour < 8) return;\n"
+        '  await sms.send({ to, text: "(광고) 가나다몰 02-123-4567 쿠폰 도착 무료거부 080-123-4567" });\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    pack = load_pack(KR_CORE)
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    assert f in static.partial_unparsed
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static)
+    assert not [x for x in res.findings if x.ref == NIGHT_RULE]
+    assert [(c["rule"], c["line"]) for c in res.static_cleared if c["policy"] == "kr.network-act.50-3"] == [
+        ("ad-send-without-night-guard", 8)
+    ]
+
+
+def test_a_file_with_more_functions_than_the_match_limit_is_reported_not_cleared(tmp_path):
+    """끼워 넣은 오류가 아니라 실제 엔진으로 본다. 함수가 1만 개를 넘으면 경계 규칙이 매치 상한을 넘겨 경계가
+    하나도 돌아오지 않는다. 정책 조건은 첫 실행에서 끝났으므로 다른 규칙의 값은 그대로다."""
+    cols = "\n".join(f"  col{i}(row: Row) {{ return row.v{i % 9}; }}" for i in range(10_050))
+    f = tmp_path / "table.ts"
+    f.write_text(
+        'import { sms } from "./sms";\n\n'
+        f"export class Table {{\n{cols}\n}}\n\n"
+        "export async function sendCoupon(to: string) {\n"
+        "  const hour = new Date().getHours();\n"
+        "  if (hour >= 21 || hour < 8) return;\n"
+        '  await sms.send({ to, text: "(광고) 가나다몰 02-123-4567 쿠폰 도착 무료거부 080-123-4567" });\n'
+        "}\n\n"
+        "export async function sendMidnightDeal(to: string) {\n"
+        '  await sms.send({ to, text: "자정까지 전 품목 반값" });\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    pack = load_pack(KR_CORE)
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    assert static.runs == 2 and static.regions == {} and static.regions_failed == {f}
+    assert static.incomplete == set()
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static)
+    night = [x for x in res.findings if x.ref == NIGHT_RULE]
+    assert [x.outcome.value for x in night] == ["needs-review-uncertain"]
+    assert res.incomplete == [str(f)] and not res.static_cleared
+
+
+def test_a_file_without_boundaries_and_without_any_guard_stays_a_plain_warning(monkeypatch):
+    """대안이 파일 어디에도 없으면 함수 경계가 없어도 결론은 같다. '불확실'로 낮추지 않는다."""
+    _fail_the_boundary_run(monkeypatch, "timeout")
+    pack = load_pack(KR_CORE)
+    f = KR_CORE / "tests" / "network-act-50-3" / "violating.ts"
+    static = SemgrepBackend().run(compile_static(pack), [f])
+    assert static.regions_failed == {f}
+    res = evaluate(pack, [Target(path=f, lang="typescript")], static, judge=FakeJudge("아니오"))
+    assert [x.outcome.value for x in res.findings if x.ref == NIGHT_RULE] == ["needs-review"]
+    assert res.incomplete == [str(f)]
+
+
+def test_boundaries_that_came_back_are_used_even_when_the_boundary_run_reported_an_error(monkeypatch):
+    """어느 파일인지 모르는 오류는 그 실행의 대상을 모두 '실패'로 적는다. 경계가 돌아온 파일은 그 경계로 판정한다."""
+    real = SemgrepBackend.raw
+
+    def raw(self, config, targets):
+        data, elapsed = real(self, config, targets)
+        if all(r["id"].startswith("policypack-region") for r in config["rules"]):
+            data.setdefault("errors", []).append({"type": "Fatal error", "level": "error", "message": "boom"})
+        return data, elapsed
+
+    monkeypatch.setattr(SemgrepBackend, "raw", raw)
+    pack = load_pack(KR_CORE)
+    static = SemgrepBackend().run(compile_static(pack), [TWO_SENDS])
+    assert static.regions_failed == {TWO_SENDS} and static.regions
+    res = evaluate(pack, [Target(path=TWO_SENDS, lang="typescript")], static, judge=FakeJudge("아니오"))
+    night = [f for f in res.findings if f.ref == NIGHT_RULE]
+    assert [(f.outcome.value, f.region) for f in night] == [("needs-review", (15, 21))]
+    assert res.engine_errors and res.incomplete == [str(TWO_SENDS)]
 
 
 def test_boundaries_where_needed_give_the_same_verdicts_as_boundaries_everywhere(monkeypatch, kr):
@@ -215,7 +492,7 @@ def test_anchor_flags_the_unguarded_function(probes):
 
 
 def test_anchor_limits_are_recorded_honestly(probes):
-    """구역 밖의 가드는 보지 못한다. 경고를 올리는 방향의 오류라 방향성 신뢰는 지키지만 오탐이다.
+    """구역 밖의 가드는 보지 못한다. 경고를 올리는 방향의 오류라 방향성 신뢰는 지키지만 오경보다.
     cron 이 함수 이름을 참조하는 경우와, 가드가 다른 함수(헬퍼)에 있는 경우."""
     assert {"ads-schedule-ref.ts", "child-helper.ts"} <= flagged(probes["anchor"])
 
