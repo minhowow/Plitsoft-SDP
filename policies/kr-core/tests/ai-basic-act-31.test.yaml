@@ -19,7 +19,7 @@ cases:
   - file: ai-basic-act-31/no-ai.tsx
     expect: not-applicable
 
-  # 알려진 오탐 — 적용 조건 ai-source 가 이름 AiCoursePage 에 걸린다. 모델을 부르지 않는
+  # 알려진 오경보 — 적용 조건 ai-source 가 이름 AiCoursePage 에 걸린다. 모델을 부르지 않는
   # 강의 소개인데 검토 필요가 된다. 경고를 올리는 쪽이라 그대로 두고, 이렇게 픽스처로 적어 둔다.
   # 같은 화면에 '생성형 AI' 문구가 있어도 약한 문구 대안이라 판정자가 결과물 표시를 확인해야 풀린다
   # (ai-basic-act-31-1/ai-course-page.tsx)

@@ -90,7 +90,7 @@ cases:
     expect: needs-review
     ai: {ai-guard: no}
 
-  # ── 슬래시 없이 적는 가입 경로 (2026-10-07 검토에서) ─────────────────────────
+  # ── 가입 경로 꼴 (2026-10-07 검토에서) ───────────────────────────────────
   - file: pipa-22-2/register-path.ts
     note: 슬래시가 있는 경로 "/register"
     expect: needs-review
@@ -159,3 +159,126 @@ cases:
     note: 판정자가 답을 정하지 못하면(판정자가 없을 때와 같다) 문구 때문에 '불확실'로 남는다. 풀리지는 않는다
     expect: needs-review-uncertain
     ai: {ai-guard: unknown}
+
+  # ── 가입 신호가 하나뿐인 파일 (2026-10-08 검토에서) ──────────────────────────
+  # 거름막 signup-hint 는 signup-context 의 세 갈래가 쓰는 낱말을 모두 담아야 한다. 한쪽만 좁히면 실제 가입이
+  # 조용해지는데, 신호가 여럿인 픽스처로는 드러나지 않는다. 갈래마다 그 신호 하나만 있는 파일을 둔다.
+  - file: pipa-22-2/signup-korean-heading-only.tsx
+    note: 가입 낱말이 띄어 쓴 '회원 가입' 제목뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/signup-camel-handler-only.ts
+    note: 가입 낱말이 함수 이름 handleSignUp 뿐이다(대문자가 섞인 이름)
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/signup-snake-name-only.js
+    note: 가입 낱말이 함수 이름 sign_up 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/signup-hyphen-route-only.ts
+    note: 가입 낱말이 경로 "/auth/sign-up" 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/register-member-call-only.ts
+    note: 가입 낱말이 호출 이름 registerMember 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/join-us-name-only.ts
+    note: 가입 낱말이 함수 이름 joinUs 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/signup-korean-unspaced-only.tsx
+    note: 가입 낱말이 붙여 쓴 '회원가입' 제목뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/register-user-const-only.ts
+    note: 가입 낱말이 화살표 함수를 담은 상수 이름 registerUser 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/join-member-bare-call-only.ts
+    note: >
+      가입 낱말이 받는 쪽 없이 부르는 joinMember(...) 뿐이다. 들여온 이름이면 $O.$F(...) 에도 맞아 이 갈래만
+      가려내지 못하므로 들여오지 않는다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/signup-single-quote-route-only.js
+    note: 가입 낱말이 홑따옴표로 적은 경로 '/signup' 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+
+  # ── 나이 신호가 하나뿐인 파일 (2026-10-08 검토에서) ──────────────────────────
+  - file: pipa-22-2/birth-korean-label-only.tsx
+    note: 나이 신호가 '생년월일' 라벨뿐이다(상태 이름은 ymd)
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/age-field-decl-only.ts
+    note: '나이 신호가 필드 선언(age: z.number()) 뿐이다'
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/age-string-key-only.ts
+    note: 나이 신호가 필드 이름 문자열("age") 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/age-member-access-only.ts
+    note: 나이 신호가 멤버 접근(req.body.age) 뿐이다
+    expect: needs-review
+    ai: {ai-guard: no}
+
+  # ── 연령 문구의 경계 (2026-10-08 검토에서) ───────────────────────────────────
+  - file: pipa-22-2/age-gate-checkbox.tsx
+    id: pipa-22-2/age-gate-checkbox.tsx#judge-unsure
+    note: >
+      판정자가 답을 정하지 못하면 '만 14세 이상입니다' 문구 때문에 '불확실'로 남는다. 풀리지는 않는다
+    expect: needs-review-uncertain
+    ai: {ai-guard: unknown}
+  - file: pipa-22-2/age-114-text.ts
+    note: >
+      '114세 미만' 은 연령 확인 문구가 아니다. 문구로 읽으면 판정자가 답을 정하지 못했을 때 '불확실'로 낮아진다.
+      판정자의 '아니오'는 약한 대안의 매치를 덮으므로 이 경계는 '모름' 답으로만 드러난다
+    expect: needs-review
+    ai: {ai-guard: unknown}
+
+  # ── 알려진 한계 (2026-10-08 검토에서) ───────────────────────────────────────
+  - file: pipa-22-2/user-dob-suffix.ts
+    note: 알려진 한계(놓침). dob 가 이름 뒤에 붙은 userDob · user_dob. dob 는 이름 앞에 올 때만 센다(adobe 같은 낱말 때문)
+    expect: not-applicable
+  - file: pipa-22-2/birth-inside-word-join-event.ts
+    note: >
+      알려진 한계(오경보). 다른 낱말 속의 birth(rebirthCount), dob 로 시작할 뿐인 낱말(doberman), 소켓 이벤트
+      "join". 가입도 아니고 나이도 받지 않는다
+    expect: needs-review
+    ai: {ai-guard: no}
+  - file: pipa-22-2/users-route-no-signup-word.ts
+    note: >
+      알려진 한계(놓침). 가입을 POST /api/users 로 받는다. 경로에도 이름에도 가입 낱말(signup·register·join·회원가입)이
+      없어 적용되지 않는다
+    expect: not-applicable
+  - file: pipa-22-2/split-controller.ts
+    note: >
+      알려진 한계(놓침). 가입 경로(@Post("signup"))는 여기 있고 생년월일 필드는 DTO 파일에 있다. 파일 단위라 둘을
+      잇지 못한다
+    expect: not-applicable
+  - file: pipa-22-2/split-create-user.dto.ts
+    note: 알려진 한계(놓침). 위 컨트롤러가 받는 DTO. birthDate 는 있지만 가입 낱말이 없다
+    expect: not-applicable
+  - file: pipa-22-2/signup-template-route-only.ts
+    note: >
+      알려진 한계(놓침). 가입 경로를 기준 주소를 끼운 템플릿 문자열(`${API_URL}/auth/signup`)로만 적었다. 경로 식은
+      따옴표 바로 뒤에서 경로가 시작해야 맞는다
+    expect: not-applicable
+  - file: pipa-22-2/signup-absolute-url-only.ts
+    note: 알려진 한계(놓침). 가입 경로를 주소 전체("https://…/auth/signup")로만 적었다
+    expect: not-applicable
+  - file: pipa-22-2/exports-signup-assignment.js
+    note: >
+      알려진 한계(놓침). 가입 처리기를 대입으로 이름 붙였다(exports.signup = …). 이름은 함수 선언·메서드·const
+      선언·호출에서만 본다
+    expect: not-applicable
+  - file: pipa-22-2/create-account-name.ts
+    note: 알려진 한계(놓침). 가입 함수의 이름이 createAccount 다. 가입 낱말(signup·register·join·회원가입)이 없다
+    expect: not-applicable
+  - file: pipa-22-2/register-bare-name.ts
+    note: >
+      알려진 한계(놓침). 가입 함수의 이름이 register 뿐이다. register 는 registerUser·registerMember·registerAccount
+      꼴만 센다(react-hook-form 의 register(), registerCleanup 과 가르려고)
+    expect: not-applicable

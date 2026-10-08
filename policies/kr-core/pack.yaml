@@ -57,8 +57,11 @@ policies:
           # 가입 맥락. 파일 전체의 낱말(register·join)이 아니라 가입을 가리키는 코드 모양을 본다: 가입 문구, 가입
           # 경로 문자열, 가입 이름의 함수 정의·호출. path.join·registerCleanup·react-hook-form 의 register() 는 세지
           # 않는다(dev 평가 2026-09-30: CLI 도구의 잠금 파일·경로 코드가 가입으로 읽혔다).
-          # 경로 문자열은 signup·register·join 으로 끝나는(또는 그 뒤에 하위 경로가 붙는) 문자열이다. 슬래시가 없는
-          # 낱말 하나("join", "register")도 센다. NestJS 데코레이터(@Post("join")), 기준 주소를 둔 클라이언트의
+          # 경로 문자열은 따옴표 바로 뒤에서 시작해 마디 하나가 signup·register·join 인 문자열이다("/auth/signup",
+          # "register", "/join/step2"). 기준 주소를 끼운 템플릿(`${API}/signup`)과 주소 전체("https://…/signup")는
+          # 맞지 않는다(알려진 한계, 픽스처 signup-template-route-only.ts · signup-absolute-url-only.ts). 이름은 함수
+          # 선언·메서드·const 선언·호출에서만 본다(exports.signup = … 은 보지 않는다, 픽스처
+          # exports-signup-assignment.js). 슬래시가 없는 낱말 하나("join", "register")도 센다. NestJS 데코레이터(@Post("join")), 기준 주소를 둔 클라이언트의
           # 상대 경로(api.post("register", …)), 중첩 라우트(path: "join")가 그렇게 적는다. 그래서 SQL 조각 "JOIN" 과
           # 소켓 이벤트 "join" 도 가입 맥락으로 읽힌다(알려진 한계, 픽스처 join-word-not-signup.ts). 2026-10-07 에
           # 슬래시가 앞에 있는 꼴로 좁혔다가, 나이를 받는 실제 가입을 놓치는 것이 확인되어 되돌렸다. dev 저장소
@@ -66,7 +69,9 @@ policies:
           # 앞의 signup-hint 는 정규식 하나짜리 거름막이다. signup-context 의 세 갈래가 쓰는 낱말을 모두 담는다(고칠
           # 때는 함께 고친다). signup-context 는 구문 패턴이 섞여 있어 파싱이 안 된 파일에서 '모름'이 된다. 그러면
           # 나이 조건만으로 가입과 무관한 파일(프로필 화면의 birthday)이 '불확실'로 남는다. 가입 낱말이 하나도 없는
-          # 파일은 이 거름막이 파싱과 무관하게 '거짓'으로 돌려보낸다.
+          # 파일은 이 거름막이 파싱과 무관하게 '거짓'으로 돌려보낸다. 보고하는 줄은 적용 조건이 맞은 가장 앞
+          # 자리라, 이 거름막 때문에 가입 낱말이 처음 나온 줄(import, 타입 이름)이 될 수 있다. 갈래마다 그 신호
+          # 하나뿐인 픽스처가 있다(signup-*-only, register-member-call-only, join-us-name-only).
           - id: signup-hint
             static:
               pattern-regex: (?i)회원\s*가입|sign[-_]?up|register|join
@@ -97,7 +102,9 @@ policies:
           # 2026-10-06). 아래 약한 대안 age-gate-text 가 그 문구를 본다. 그래서 나이를 받지 않고 이 문구만 있는
           # 가입에는 규칙이 적용되지 않는다 — 나이를 묻지 않는 가입을 이 규칙은 보지 않는다. 나이를 받더라도 이
           # 조건이 알아보지 못하는 모양(줄여 쓴 속성 { email, age }, 상태 변수 age, '생일'·'출생연도' 라벨뿐인 입력)
-          # 이면 문구가 있어도 적용되지 않는다(알려진 한계, 픽스처 age-shorthand-notice.tsx).
+          # 이면 문구가 있어도 적용되지 않는다(알려진 한계, 픽스처 age-shorthand-notice.tsx). 식의 갈래마다 그 신호
+          # 하나뿐인 픽스처가 있다(birth-korean-label-only, user-birth, dob-parts, age-field-decl-only,
+          # age-string-key-only, age-member-access-only).
           - id: birth-or-age
             static:
               pattern-regex: (?i)생년월일|birth|(?<![-\w])dob\w*|(?<![-\w.])age\??\s*:\s*\S|["']age["']|\.age\b
@@ -154,7 +161,7 @@ policies:
               pattern-regex: (?<!\d)(?:만\s*)?14\s*세\s*(?:이상|미만)
             on-unsatisfied:
               message: 가입자가 만 14세 이상인지 확인하는 항목(예 '만 14세 이상입니다' 필수 체크)이 보이지 않습니다.
-              ask-developer: 가입자가 만 14세 이상인지 어디서 확인하고, 확인하지 않으면 가입이 막히나요?
+              ask-developer: 가입자가 만 14세 이상인지 어디서 확인하나요? 그 확인을 거치지 않으면 가입이 막히나요?
 
           - id: ai-guard
             ai:
@@ -208,9 +215,11 @@ policies:
         낮 시간 수신 동의만 받아 두고 야간에 발송하면 별도 동의 요건을 건너뛰게 된다.
         법 제50조 제3항 단서와 시행령 제61조 제2항이 전자우편을 이 요건에서 뺀다.
       implementation: >
-        광고 표기와 전자우편이 아닌 발송 호출이 함께 있는 파일에서, 발송 호출을 감싸는 가장 바깥 함수마다 그 함수
-        안에 야간 차단, 주간 전용 스케줄, 또는 야간 동의 확인이 있는지 본다. 그 함수 밖(호출하는 쪽, 다른 함수,
-        다른 파일)에 있는 가드와 스케줄은 보지 못해 검토 필요로 남는다
+        광고 표기와 전자우편이 아닌 발송 호출이 함께 있는 파일에서, 발송 호출을 감싸는 가장 바깥 함수마다 그 함수와
+        줄이 겹치는 야간 차단, 주간 전용 스케줄, 야간 동의 확인이 있는지 본다. 함수 안에 있는 것, 그 함수를 감싸는
+        스케줄 호출·작업 객체, 그 함수의 첫 줄에 함께 적힌 스케줄이 여기에 든다. 줄이 겹치지 않는 곳(이름 있는
+        처리기를 스케줄에 거는 줄, 줄을 나눠 적은 스케줄 사슬, 다른 함수, 다른 파일)의 가드와 스케줄은 보지 못해
+        검토 필요로 남는다
 
     rules:
       - id: ad-send-without-night-guard
@@ -219,7 +228,10 @@ policies:
         # 발송이 한 파일에 있으면 경고가 없었다).
         # 막지 못하는 것(픽스처 two-schedules-in-one-function.ts · top-level-send-guard-elsewhere.ts): 두 발송이
         # 같은 바깥 함수 안에 있으면(스케줄을 한꺼번에 거는 함수, 라우터를 묶는 함수, 컴포넌트) 한쪽의 가드가
-        # 다른 쪽까지 푼다. 발송이 모두 함수 밖인 파일은 파일 전체로 판정한다.
+        # 다른 쪽까지 푼다. 발송이 모두 함수 밖인 파일은 파일 전체로 판정한다. 판정 구역은 줄 범위라, 한 줄로
+        # 축소된 파일은 그 줄이 통째로 한 구역이다(픽스처 one-line-two-senders.js). 함수 경계를 믿을 수 없는
+        # 파일(엔진이 경계를 구하지 못했거나 일부가 파싱되지 않은 파일)에서는 되찾은 함수 밖의 발송을 '충족'으로
+        # 풀지 않는다 — 가드가 보이면 '불확실', 어디에도 없으면 '검토 필요'다.
         # 대가: 광고와 인증번호를 한 파일에서 보내면 인증번호 함수에도 경고가 난다. 스케줄을 발송 함수 밖에서
         # 거는 코드(큐에 반복 작업을 넣는 쪽과 꺼내 보내는 쪽이 다른 함수, 이름 있는 처리기를 스케줄에 거는 줄)는
         # 주간 스케줄이어도 경고가 난다. 발송 함수가 여럿인 파일은 함수마다 경고가 따로 나고 판정자에게도 함수마다
@@ -430,12 +442,24 @@ policies:
                     # 시간대 "TZ=UTC 0 12 * * *" 의 TZ=UTC 를 초 칸으로 읽는다. 서울로 적은 접두사만 받는다.
                     regex: ^\s*((CRON_)?TZ=Asia/Seoul\s+)?([\d*?/,-]+\s+)?[\d*?/,-]+\s+([89]|1\d|20)(\s+\S+){3}\s*$
                 # 시간대를 서울이 아닌 곳으로 적은 스케줄은 받지 않는다. "0 12 * * *" 에 timezone "UTC" 면 한국
-                # 시각 21시다. 옵션 객체의 timezone·tz·utc, 이어 부른 .timeZone(...), 식 앞의 TZ= 를 본다.
-                # 시간대를 적지 않았거나 옵션 객체를 변수·전개·환경 변수로 넘긴 스케줄은 받는다 — 서버 시간대가
-                # 한국이라고 보는 것이고, UTC 로 도는 서버에서는 틀린다(알려진 한계. night-hour-block 의
-                # getHours() 도 같다).
+                # 시각 21시다. 세 꼴 모두 옵션·작업 객체에 문자열로 적은 timezone·tz 와 utc: true 를 보고, 이어 부른
+                # .timeZone("…") 과 식 앞의 TZ= 를 본다. 걸러내는 줄은 경고를 늘리기만 한다 — 쓰는 곳을 확인하지 못한
+                # 꼴이라고 빼면 그 꼴의 야간 스케줄이 조용히 통과한다(2026-10-08 검토: schedule(식, 함수, { tz }) 줄을
+                # 뺐다가 되살렸다). 줄마다 픽스처가 하나씩 있다. schedule 호출의 옵션 객체는 인자 어느 자리에 있든
+                # 본다.
+                # 받는 것(알려진 한계, 픽스처 firebase-schedule-no-zone.ts · inngest-cron-no-zone.ts ·
+                # schedule-timezone-camel-key.ts · schedule-options-variable.ts): 시간대를 적지 않은 스케줄, timeZone
+                # 처럼 다른 키로 적은 시간대, 옵션 객체를 변수·전개·환경 변수로 넘긴 스케줄. 서버 시간대가 한국이라고
+                # 보는 것이라, UTC 로 도는 서버와 기본 시간대가 한국이 아닌 예약 실행 서비스에서는 틀린다
+                # (night-hour-block 의 getHours() 도 같다). Firebase 사슬과 Inngest 트리거 객체는 콜백을 감싸지 않아,
+                # 콜백과 같은 줄에 있을 때만 판정 구역과 겹친다. 줄을 나눠 적으면 시간대와 무관하게 검토 필요로
+                # 남는다(픽스처 firebase-schedule-multiline-seoul-daytime.ts).
                 - pattern-not: |
-                    $C.schedule("$SPEC", $FN, {..., timezone: "=~/^(?!Asia\/Seoul$)/", ...})
+                    $C.schedule("$SPEC", ..., {..., timezone: "=~/^(?!Asia\/Seoul$)/", ...}, ...)
+                - pattern-not: |
+                    $C.schedule("$SPEC", ..., {..., tz: "=~/^(?!Asia\/Seoul$)/", ...}, ...)
+                - pattern-not: |
+                    $C.schedule("$SPEC", ..., {..., utc: true, ...}, ...)
                 # Firebase 예약 함수는 시간대를 객체가 아니라 이어 부른 .timeZone(...) 로 적는다
                 - pattern-not-inside: |
                     $C.schedule("$SPEC", ...). ... .timeZone("=~/^(?!Asia\/Seoul$)/")
@@ -637,13 +661,13 @@ policies:
           #   - 'openai' 모듈 import 는 넣지 않았다. 임베딩 검색 화면도 같은 import 를 쓴다. OpenAI 생성
           #     호출은 .chat.completions. 와 모델 이름(gpt-…)으로 잡힌다
           #   - 엔드포인트는 맨 /api/chat·/api/generate 만 넣었다. /api/completions 는 강의 수료 같은 것도
-          #     그 이름을 써서 뺐다. /api/chat 을 부르는 사람 상담 채팅도 걸린다(알려진 오탐)
+          #     그 이름을 써서 뺐다. /api/chat 을 부르는 사람 상담 채팅도 걸린다(알려진 오경보)
           #   - 이름 신호는 대소문자를 가려 본다. (?i)\bai[a-z_]\w* 로 두면 Airplane·aim·aid 에도 맞는다.
           #     그래서 (?-i:) 안에서 ai/Ai/AI 뒤에 대문자나 밑줄이 오는 꼴만 센다 — aiEnabled·AiBrainIcon·
           #     AIComponents·AI_KEY 는 그대로 걸리고 Airplane·airplane·aim 은 빠진다.
           #     assistant 도 소문자 낱말(채팅 역할)과 Assistant+대문자(AssistantMessage)만 센다.
           #     홑낱말 Assistant 는 글꼴 이름(FONT_FAMILY.Assistant)과 메뉴 항목("Word Assistant")이라 뺐다.
-          #   - 남은 알려진 오탐: AiCoursePage 처럼 Ai+대문자인 이름(AI 를 부르지 않는 강의 소개)은
+          #   - 남은 알려진 오경보: AiCoursePage 처럼 Ai+대문자인 이름(AI 를 부르지 않는 강의 소개)은
           #     그대로 걸린다. 경고를 올리는 쪽이라 그대로 둔다. 픽스처 ai-course-page-nolabel.tsx
           - id: ai-source
             # 이 파일이 생성형 AI 를 쓰거나 그 결과를 받는가. 글자 모양이 아니라 코드 모양으로 본다: 생성 전용 AI SDK 를
@@ -870,7 +894,7 @@ policies:
           #     직접 부를 때도 같은 경로(/v1/embeddings·/v1/models·moderations·:embedContent·:countTokens)를 뺀다
           #   - /api/chat/rooms 같은 하위 경로, /api/generate-invoice, /api/agent(상담원), 관리 화면의
           #     /api/ai/usage·/api/copilot/seats 는 넣지 않았다
-          # 일부러 남긴 오탐: 맨 /api/chat·/api/completions·/api/generate 는 AI SDK·예제의 기본 엔드포인트라
+          # 일부러 남긴 오경보: 맨 /api/chat·/api/completions·/api/generate 는 AI SDK·예제의 기본 엔드포인트라
           # 넣었다. 사람 상담 채팅이나 강의 수료(/api/completions)도 걸린다. 빼면 AI 채팅 화면에서 규칙이
           # 말없이 꺼진다(픽스처 human-live-chat.tsx 와 달리 이 둘은 훅도 직접 만들지 않아 가릴 수 없다).
           # 고치지 않은 놓침(한 파일만 보는 규칙의 한계다):
@@ -1331,7 +1355,7 @@ policies:
     # 어휘 말고도 광고 신호로 보는 것: 빈칸·부호를 넣은 표시('(광 고)'), 발송 대행사의 광고 표시
     # (contentType "AD", adFlag, isAd). 둘 다 kr.network-act.50-3 의 ad-marker 와 같은 식이다.
     # 알려진 한계: 어휘도 표시도 광고 플래그도 없는 광고("가을 신상 입고! 무료배송")는 ad-intent 가
-    # 거짓이라 규칙이 조용히 꺼진다. 팩에서 어휘를 넓히면 거래 안내 오탐이 늘어난다.
+    # 거짓이라 규칙이 조용히 꺼진다. 팩에서 어휘를 넓히면 거래 안내 오경보가 늘어난다.
     #
     # 발송 호출은 SDK·게이트웨이가 드러나는 모양만 센다(목록은 kr.network-act.50-3 의 &nonemail-send).
     # 이름이 send 인 메서드 전부를 세면 Express res.send, ws.send, socket.send 가 광고 발송이 된다.
@@ -1340,7 +1364,7 @@ policies:
     # (new SolapiMessageService·coolsms)나 FCM messaging 에서 나온 것만, messages.create 는 인자에 to 가
     # 있거나 twilio 클라이언트에서 나온 것만 센다.
     # 알려진 한계: 받는 쪽을 모르는 `sms.send(...)`·주입된 `this.smsService.send(...)` 는 세지 않는다.
-    # 세면 위의 오탐이 돌아오고, 세지 않으면 이 규칙이 꺼진다. 그런 파일의 야간 발송은 50-3 이
+    # 세면 위의 오경보가 돌아오고, 세지 않으면 이 규칙이 꺼진다. 그런 파일의 야간 발송은 50-3 이
     # (적용으로 두어) 잡는다.
     # 이메일 SDK 는 비이메일 조건에 처음부터 들어가지 않는다. SES 의 ses.send 는 SESClient 에서
     # 나오고, SendGrid 의 sgMail.send 는 비이메일 목록에 없다.

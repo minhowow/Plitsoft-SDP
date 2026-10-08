@@ -1,0 +1,1 @@
+export async function sendCoupon(to){const hour=new Date().getHours();if(hour>=21||hour<8)return;await sms.send({to,text:"(광고) 가나다몰 02-123-4567 쿠폰 무료거부 080-123-4567"})}export async function sendMidnightDeal(to){await sms.send({to,text:"자정까지 전 품목 반값"})}

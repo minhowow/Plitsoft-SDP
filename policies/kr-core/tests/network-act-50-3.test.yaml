@@ -354,7 +354,7 @@ cases:
     expect: compliant
   - file: network-act-50-3/schedule-named-handler-daytime.ts
     note: >
-      알려진 한계(오탐). 이름 있는 처리기를 서울 오전 10시 스케줄에 건다. 스케줄 줄이 발송 함수 밖이라 정적 대안이
+      알려진 한계(오경보). 이름 있는 처리기를 서울 오전 10시 스케줄에 건다. 스케줄 줄이 발송 함수 밖이라 정적 대안이
       보지 못하고, 판정자가 그 줄을 인용해 '예'라고 답해도 판정 구역 밖이라 받지 않는다
     expect: needs-review
     ai:
@@ -381,6 +381,89 @@ cases:
     note: >
       "0 9 * * *" 에 timezone "America/New_York" 은 한국 시각 22시나 23시다. UTC 만이 아니라 서울이 아닌 시간대는
       모두 받지 않는다
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+
+  # ── 시간대 걸러내기의 남은 갈래와 한계 (2026-10-08 검토에서) ─────────────────
+  - file: network-act-50-3/schedule-call-tz-newyork-night.ts
+    note: >
+      schedule(식, 함수, { tz: "America/New_York" }) 꼴. 시간대 키가 tz 여도 "0 9 * * *" 뉴욕은 한국 시각 22시나
+      23시다. UTC 만이 아니라 서울이 아닌 시간대는 모두 받지 않는다
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-call-utc-flag-night.ts
+    note: 'schedule(식, 함수, { utc: true }) 꼴'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/job-object-cron-utc-flag-night.ts
+    note: '작업 정의 객체에 utc: true. cron "0 13 * * *" 는 한국 시각 22시다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/firebase-schedule-no-zone.ts
+    note: >
+      알려진 한계(놓침). Firebase 예약 함수에 .timeZone(...) 이 없다. 시간대를 적지 않은 스케줄은 한국 시각으로 보고
+      받는데, 예약 실행 서비스의 기본 시간대는 한국이 아니다. 스케줄 호출이 콜백과 같은 줄에 있을 때의 판정이다.
+      사슬을 줄마다 나눠 적으면 스케줄 호출이 판정 구역과 겹치지 않아 시간대와 무관하게 검토 필요로 남는다
+    expect: compliant
+  - file: network-act-50-3/inngest-cron-no-zone.ts
+    note: >
+      알려진 한계(놓침). 식 앞에 TZ= 가 없는 cron 트리거. 시간대를 적지 않은 스케줄은 한국 시각으로 보고 받는데, 예약
+      실행 서비스의 기본 시간대는 한국이 아니다. 트리거 객체가 콜백과 같은 줄에 있을 때의 판정이다. 인자를 줄마다
+      나눠 적으면 트리거 객체가 판정 구역과 겹치지 않아 시간대와 무관하게 검토 필요로 남는다
+    expect: compliant
+  - file: network-act-50-3/one-line-two-senders.js
+    note: >
+      알려진 한계(놓침). 한 줄로 축소된 파일. 판정 구역은 줄 범위라 한 줄이 통째로 한 구역이 되고, 앞 함수의 야간
+      가드가 같은 줄의 가드 없는 발송까지 푼다
+    expect: compliant
+  - file: network-act-50-3/firebase-schedule-multiline-seoul-daytime.ts
+    note: >
+      알려진 한계(오경보). 사슬을 줄마다 나눠 적은 서울 오전 10시 예약 함수. 스케줄 호출과 .timeZone 줄이 콜백 앞줄이라
+      판정 구역과 겹치지 않는다. 판정자가 그 줄을 인용해 '예'라고 답해도 판정 구역 밖이라 받지 않는다
+    expect: needs-review
+    ai:
+      ai-night-guard:
+        answer: yes
+        cite: '.timeZone("Asia/Seoul")'
+  - file: network-act-50-3/schedule-early-morning-night.ts
+    note: '"0 7 * * *" 는 오전 7시다. 야간은 오전 8시까지다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-monthly-night.ts
+    note: '다섯 칸 식 "0 22 15 * *" 는 매달 15일 22시다. 셋째 칸 15 를 시로 읽으면 안 된다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-timezone-camel-key.ts
+    note: >
+      알려진 한계(놓침). 시간대 키가 timeZone 이다. 문자열로 적은 timezone·tz 와 utc: true 만 거른다. "0 12 * * *"
+      UTC 는 한국 시각 21시다
+    expect: compliant
+  - file: network-act-50-3/schedule-options-variable.ts
+    note: 알려진 한계(놓침). 옵션 객체를 변수로 넘겼다. 호출 자리에 적은 객체만 본다
+    expect: compliant
+  - file: network-act-50-3/hour-guard-other-zone.ts
+    note: >
+      알려진 한계(놓침). 시각 가드를 뉴욕 시각으로 구했다. 가드는 UTC 로 구한 시각만 거르고 다른 시간대는 그대로
+      받는다
+    expect: compliant
+  - file: network-act-50-3/schedule-options-first-tz-night.ts
+    note: '옵션 객체가 콜백 앞에 온 schedule(식, { tz: "UTC" }, 함수). 옵션은 인자 어느 자리에 있든 본다'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-fourth-arg-timezone-night.ts
+    note: '옵션 객체 뒤에 인자가 더 있는 schedule(식, 함수, { timezone: "UTC" }, 이름)'
+    decoy-for: [daytime-schedule]
+    expect: needs-review
+    ai: {ai-night-guard: no}
+  - file: network-act-50-3/schedule-options-first-utc-flag-night.ts
+    note: '옵션 객체가 콜백 앞에 온 schedule(식, { utc: true }, 함수)'
     decoy-for: [daytime-schedule]
     expect: needs-review
     ai: {ai-night-guard: no}

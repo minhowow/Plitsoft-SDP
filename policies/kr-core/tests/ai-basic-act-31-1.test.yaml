@@ -123,7 +123,7 @@ cases:
     note: >
       /api/ai/usage 는 토큰 사용량 표다. 관리 화면의 하위 경로(usage·seats·billing 등)는
       자체 엔드포인트 이름 규칙에서 뺀다. 제31조 제2항 규칙은 이름만 보는 문턱(/api/ai/)이 걸려
-      그대로 검토 필요로 남는다(알려진 오탐, 경고를 올리는 쪽)
+      그대로 검토 필요로 남는다(알려진 오경보, 경고를 올리는 쪽)
     expect:
       kr.ai-basic-act.31-1/genai-feature-without-prior-notice: not-applicable
       kr.ai-basic-act.31/ai-output-without-label: needs-review

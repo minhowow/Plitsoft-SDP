@@ -22,6 +22,8 @@ cases:
       조용하다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/nonemail-start-block: not-applicable
+      kr.network-act.50-4/nonemail-end-optout: not-applicable
   - file: ad-shapes/i18n-push.ts
     note: >
       알려진 한계(놓침). 푸시 문구가 번역 카탈로그에서 온다. 코드에 광고 신호가 없다
@@ -169,6 +171,8 @@ cases:
       정책 모두 조용하다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
+      kr.network-act.50-4/nonemail-start-block: not-applicable
+      kr.network-act.50-4/nonemail-end-optout: not-applicable
   - file: ad-shapes/sens-axios-config.js
     note: >
       알려진 한계(놓침). NCP SENS 를 axios({url, data}) 꼴로 부르고, 주소는 서비스 id 를 끼운 템플릿을 지역 변수에
@@ -342,7 +346,7 @@ cases:
   # ── 전자우편 ──────────────────────────────────────────────────────────────────
   - file: ad-shapes/brevo-newsletter.ts
     note: >
-      알려진 한계(놓침). Brevo SDK 로 주간 특가 메일을 보낸다. 전자우편 발송으로 알아보지 못한다
+      알려진 한계(놓침). Brevo SDK 로 주간 뉴스레터 메일을 보낸다. 전자우편 발송으로 알아보지 못한다
     expect:
       kr.network-act.50-3/ad-send-without-night-guard: not-applicable
       kr.network-act.50-4/email-subject-label: not-applicable
