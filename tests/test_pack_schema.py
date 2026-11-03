@@ -1,4 +1,4 @@
-"""정책 팩 문법 v0.3 검증.
+"""정책 팩 문법 v0.4 검증.
 
 실제로 쓰는 팩(policies/kr-core)이 읽히는지, 그리고 잘못된 팩이 **조용히 통과하지
 않는지**를 본다. 후자가 더 중요하다. 오타 난 조건이 조용히 빠지면 규칙이 꺼진 줄
@@ -183,7 +183,7 @@ def test_review_dates_are_set(pack):
 # ── 잘못된 팩은 거부된다 ────────────────────────────────────────────────────
 
 MINIMAL = """
-apiVersion: policypack/v0.3
+apiVersion: policypack/v0.4
 pack: {id: t, title: 시험}
 policies:
   - id: p1
@@ -211,7 +211,7 @@ def test_minimal_pack_is_valid(tmp_path):
 @pytest.mark.parametrize(
     "bad,why",
     [
-        (MINIMAL.replace("policypack/v0.3", "policypack/v0.2"), "옛 판은 거부"),
+        (MINIMAL.replace("policypack/v0.4", "policypack/v0.3"), "옛 판은 거부"),
         (MINIMAL.replace("pattern-regex: foo", "patern-regex: foo"), "오타 난 Semgrep 키"),
         (MINIMAL.replace("static: {pattern-regex: foo}", "statik: {pattern-regex: foo}"), "모르는 필드"),
         (MINIMAL.replace("{id: a1, static: {pattern-regex: foo}}", "{id: a1}"), "조건 몸통이 없음"),
@@ -238,6 +238,54 @@ def test_minimal_pack_is_valid(tmp_path):
 def test_bad_packs_are_rejected(tmp_path, bad, why):
     with pytest.raises(PackError):
         load_pack(_write(tmp_path, bad))
+
+
+# ── 의무 지도 (v0.4) ────────────────────────────────────────────────────────
+
+WITH_DUTY = MINIMAL.replace("    title: 시험 정책\n", "    title: 시험 정책\n    duties: [pipa-22-2-1]\n")
+
+
+def test_kr_core_duties_point_into_its_catalog(pack):
+    from policypack.pack.loader import load_duties
+
+    have = load_duties(KR_CORE)
+    assert all(pol.duties for pol in pack.policies), "kr-core 의 정책은 모두 의무를 가리킨다"
+    assert {d for pol in pack.policies for d in pol.duties} == set(have)
+    for row in have.values():
+        assert row["quote"] and row["duty_ko"] and row["source_url"].startswith("https://www.law.go.kr/")
+
+
+def test_duty_must_exist_in_pack_folder(tmp_path):
+    p = _write(tmp_path, WITH_DUTY)
+    with pytest.raises(PackError, match="p1 → pipa-22-2-1"):
+        load_pack(p)
+    (tmp_path / "_duties.jsonl").write_text('{"id": "pipa-22-2-1", "duty_ko": "d"}\n', encoding="utf-8")
+    assert load_pack(p).policies[0].duties == ["pipa-22-2-1"]
+
+
+@pytest.mark.parametrize(
+    "body,match",
+    [
+        ('{"id": "pipa-22-2-1"}\n{"id": "pipa-22-2-1"}\n', "중복"),
+        ("not json\n", "JSON 이 아닙니다"),
+        ('["pipa-22-2-1"]\n', "id 가 있는 객체"),
+    ],
+)
+def test_bad_duty_files_are_rejected(tmp_path, body, match):
+    (tmp_path / "_duties.jsonl").write_text(body, encoding="utf-8")
+    with pytest.raises(PackError, match=match):
+        load_pack(_write(tmp_path, WITH_DUTY))
+
+
+@pytest.mark.parametrize("bad", ["PIPA-22", "pipa", "pipa 22-2", "pipa-22-2-1, x"])
+def test_duty_id_shape(tmp_path, bad):
+    with pytest.raises(PackError):
+        load_pack(_write(tmp_path, WITH_DUTY.replace("[pipa-22-2-1]", f"['{bad}']")))
+
+
+def test_duplicate_duty_ids_rejected(tmp_path):
+    with pytest.raises(PackError, match="중복"):
+        load_pack(_write(tmp_path, WITH_DUTY.replace("[pipa-22-2-1]", "[pipa-22-2-1, pipa-22-2-1]")))
 
 
 def test_duplicate_ids_are_rejected(tmp_path):
@@ -444,7 +492,7 @@ def test_schema_refuses_to_run_outside_a_source_checkout(tmp_path, monkeypatch, 
     (tmp_path / "schemas" / "openapi.json").write_text("{}", encoding="utf-8")
     assert cli.main(["schema", "--write"]) == 2
     assert (tmp_path / "schemas" / "openapi.json").exists()
-    assert not (tmp_path / "schemas" / "policy-pack-0.3.json").exists()
+    assert not (tmp_path / "schemas" / "policy-pack-0.4.json").exists()
 
 
 def test_schema_write_removes_only_our_stale_files(tmp_path, monkeypatch):
@@ -512,7 +560,7 @@ def test_the_committed_schemas_accept_what_kr_core_writes():
         return x.isoformat() if isinstance(x, datetime.date) else x
 
     y = YAML(typ="safe", pure=True)
-    pairs = [("policy-pack-0.3.json", KR_CORE / "pack.yaml")] + [
+    pairs = [("policy-pack-0.4.json", KR_CORE / "pack.yaml")] + [
         ("policy-test-0.1.json", f) for f in sorted((KR_CORE / "tests").glob("*.test.yaml"))
     ]
     for schema_name, f in pairs:

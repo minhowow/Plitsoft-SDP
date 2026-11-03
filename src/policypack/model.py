@@ -1,4 +1,4 @@
-"""정책 팩 문법 v0.3 — 단일 진실 원천.
+"""정책 팩 문법 v0.4 — 단일 진실 원천.
 
 JSON Schema 는 이 모델에서 생성하고(`policypack schema --write`), 로더도 검증기도
 이 모델만 본다. 문법을 바꾸려면 여기만 고친다.
@@ -12,11 +12,15 @@ JSON Schema 는 이 모델에서 생성하고(`policypack schema --write`), 로�
 
 3. **방향성 신뢰를 문법에 넣는다.** 대안의 `strength` 와 AI 조건의 `evidence` 가
    "이 근거가 경고를 내릴 자격이 있는가"를 표현한다.
+
+v0.4 (2026-11-03): 정책이 국내 법 의무 지도의 의무 id 를 가리킨다(`duties`). 의무의 설명은 팩 폴더의
+`_duties.jsonl` 에 있고 로더가 id 가 모두 있는지 확인한다. 판정에는 쓰이지 않는다(에이전트형 판정기가 읽는다).
 """
 
 from __future__ import annotations
 
 import datetime as _dt
+import re as _re
 from enum import Enum
 from pathlib import PurePosixPath as _PurePosixPath
 from pathlib import PureWindowsPath as _PureWindowsPath
@@ -24,7 +28,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-API_VERSION = "policypack/v0.3"
+API_VERSION = "policypack/v0.4"
 
 
 def _kebab(name: str) -> str:
@@ -328,10 +332,16 @@ class Rationale(_Base):
     implementation: str | None = None
 
 
+#: 의무 id 의 모양(의무 지도의 id: 소문자·숫자·하이픈)
+_DUTY_ID = r"^[a-z][a-z0-9]*(-[a-z0-9]+)+$"
+
+
 class Policy(_Base):
     id: str
     category: str
     title: str
+    duties: list[str] = Field(default_factory=list, json_schema_extra={"items": {"pattern": _DUTY_ID}})
+    """이 정책이 다루는 의무 지도의 의무 id. 설명은 팩 폴더의 `_duties.jsonl` 에 있어야 한다."""
     ask_developer: str | None = None
     legal: Legal | None = None
     review: Review | None = None
@@ -341,6 +351,10 @@ class Policy(_Base):
     @model_validator(mode="after")
     def _check(self) -> Policy:
         _unique([r.id for r in self.rules], f"정책 '{self.id}' 안에서 규칙 id")
+        _unique(self.duties, f"정책 '{self.id}' 의 duties 에서 의무 id")
+        bad = [d for d in self.duties if not _re.match(_DUTY_ID, d)]
+        if bad:
+            raise ValueError(f"정책 '{self.id}': 의무 id 모양이 아닙니다: {bad} (예: pipa-22-2-1)")
         return self
 
 

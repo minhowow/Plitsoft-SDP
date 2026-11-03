@@ -38,7 +38,7 @@ SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"
 
 #: 파일명 → (모델, 제목). schema --write/--check 가 전부 다룬다.
 SCHEMAS = {
-    "policy-pack-0.3.json": ("policypack.model:PolicyPack", "정책 팩 v0.3"),
+    "policy-pack-0.4.json": ("policypack.model:PolicyPack", "정책 팩 v0.4"),
     "policy-test-0.1.json": ("policypack.packtest:PolicyTestFile", "정책 테스트 v0.1"),
 }
 

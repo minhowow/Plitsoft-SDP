@@ -392,6 +392,7 @@ def test_a_pack_file_tests_only_its_own_fixtures(tmp_path, capsys):
     import shutil
 
     shutil.copytree(REPO / "policies/kr-core/_legal", tmp_path / "_legal")
+    shutil.copy(REPO / "policies/kr-core/_duties.jsonl", tmp_path)
     (tmp_path / "tests").mkdir()
     shutil.copy(REPO / "policies/kr-core/tests/pipa-22-2.test.yaml", tmp_path / "tests")
     shutil.copytree(REPO / "policies/kr-core/tests/pipa-22-2", tmp_path / "tests" / "pipa-22-2")
@@ -570,7 +571,7 @@ def test_dates_in_a_rule_body_do_not_break_the_run(tmp_path, capsys):
     pack = tmp_path / "pack"
     pack.mkdir()
     (pack / "pack.yaml").write_text(
-        "apiVersion: policypack/v0.3\npack: {id: t, title: 시험}\ndefaults: {languages: [typescript]}\n"
+        "apiVersion: policypack/v0.4\npack: {id: t, title: 시험}\ndefaults: {languages: [typescript]}\n"
         "policies:\n  - id: p1\n    category: c\n    title: 시험 정책\n    rules:\n      - id: r1\n"
         "        applies-when:\n          - {id: a1, static: {pattern-regex: 2026-09-29}}\n"
         "        compliant-if-any:\n"

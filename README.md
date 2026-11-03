@@ -157,7 +157,7 @@ src/auth/signup.ts:12  검토 필요  만 14세 미만 아동의 개인정보 �
 
 내장 팩은 `policies/kr-core` 다. 정책 다섯(아동 동의, 야간 광고, 광고 표기, 생성형 AI 결과물 표시,
 생성형 AI 사전 고지)을 싣고, 패키지에 함께 실려 어느 저장소에서든 돈다. 다른 팩은 `--config` 로 준다.
-문법은 `schemas/policy-pack-0.3.json`(편집기 자동 완성용)과 `src/policypack/model.py` 가 정한다.
+문법은 `schemas/policy-pack-0.4.json`(편집기 자동 완성용)과 `src/policypack/model.py` 가 정한다.
 
 - **조문 추적성.** 정책마다 근거 조문을 적고, 조문 원문을 팩 안의 `_legal/` 에 커밋한 뒤 그 해시를
   `text-sha256` 에 적는다. 원문 파일이 바뀌면 `validate` 가 기록된 해시와 실제 해시를 함께 보여 준다.

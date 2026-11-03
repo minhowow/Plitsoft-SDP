@@ -1,4 +1,4 @@
-# 국내 법·정책 검토 팩 — 정책 팩 문법 v0.3
+# 국내 법·정책 검토 팩 — 정책 팩 문법 v0.4
 #
 # 조문 추적성
 #   text-file 은 국가법령정보 공동활용 API 로 받은 조문 원문이고, text-sha256 은 그 파일의 해시다.
@@ -16,8 +16,12 @@
 #   않은 조문·부칙·제재·기관 해석은 주석에만, 출처(받은 날짜나 그 기록이 있는 곳)와 함께 둔다.
 #   예외는 시행령 별표 6 하나다(kr.network-act.50-4). 원문을 아직 고정하지 못했고, 그 사실을 그 정책의
 #   rationale 에 밝혔다.
+#
+# 의무 지도
+#   duties 는 국내 법 의무 지도(docs/lawmap/duties.jsonl, 2026-10-14 조사)의 의무 id 다. 그 줄들을 이 폴더의
+#   _duties.jsonl 에 옮겨 두었다. 판정에는 쓰이지 않고, 에이전트형 판정기가 의무 설명을 읽는 데 쓴다.
 
-apiVersion: policypack/v0.3
+apiVersion: policypack/v0.4
 
 pack:
   id: kr-core
@@ -31,6 +35,7 @@ policies:
   - id: kr.pipa.22-2
     category: child-consent
     title: 만 14세 미만 아동의 개인정보 처리
+    duties: [pipa-22-2-1]
     ask-developer: 만 14세 미만 사용자를 받는다면 법정대리인 동의를 확인하거나 가입을 막고 있나요?
 
     legal:
@@ -176,6 +181,7 @@ policies:
   - id: kr.network-act.50-3
     category: ads-night-send
     title: 야간(21시~08시) 광고성 정보 전송의 별도 동의
+    duties: [netact-50-3]
     ask-developer: 이 광고가 오후 9시~다음 날 오전 8시에 문자·푸시·알림톡 등으로 나갈 수 있다면, 그 시간대 수신에 별도 동의를 받았나요? (전자우편으로만 보내는 광고는 이 요건의 예외입니다)
 
     legal:
@@ -590,6 +596,7 @@ policies:
   - id: kr.ai-basic-act.31
     category: ai-output-label
     title: 생성형 AI 결과물 표시
+    duties: [aiact-31-2]
     ask-developer: >
       이 화면에 보이는 내용이 생성형 AI 결과물이라는 표시가 있나요? 화면 표시 대신 메타데이터·워터마크 같은
       기계 판독 표시를 쓴다면, AI 생성물이라는 사실을 이용자에게 한 번 이상 안내하나요? AI 활용 사실이
@@ -798,6 +805,7 @@ policies:
   - id: kr.ai-basic-act.31-1
     category: ai-prior-notice
     title: 생성형 AI 기반 서비스 사전 고지
+    duties: [aiact-31-1]
     ask-developer: 이용자가 이 기능을 처음 쓰기 전에, 이 기능이 생성형 인공지능에 기반하여 운용된다는 사실을 어디서 알리나요?
 
     legal:
@@ -1272,6 +1280,7 @@ policies:
   - id: kr.network-act.50-4
     category: ads-disclosure
     title: 광고성 정보에 밝혀야 할 사항 — (광고) 표기, 전송자 명칭·연락처, 무료 수신거부 방법
+    duties: [netact-50-4, netact-50-6]
     ask-developer: 이 메시지가 영리목적의 광고라면 (광고) 표기, 전송자의 명칭·연락처, 수신거부 방법이 정해진 자리에 들어가나요?
 
     legal:

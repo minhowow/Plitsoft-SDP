@@ -20,7 +20,8 @@
 | `judge/` | `claude-cli:<모델>`, `anthropic:<모델>` 어댑터, 응답 규칙, 실행당 같은 질문 한 번 | 536 |
 | `evidence.py` | 인용 관문 | 146 |
 | `report/` | 글·JSON·SARIF, 안정 지문, 팩 시험 보고 | 960 |
-| `pack/`, `model.py` | 팩 문법 v0.3 | 585 |
+| `pack/`, `model.py` | 팩 문법 v0.4(정책 → 의무 id, `_duties.jsonl`) | 640 |
+| `index/` | 저장소 색인: 파일 역할, import 관계, 후보 단위(판정에는 쓰지 않음) | 330 |
 | `discover.py`, `gitscope.py` | 검사 대상 고르기 | 429 |
 | `packtest.py` | 팩 픽스처 시험(`--strict`) | 556 |
 

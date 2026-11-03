@@ -278,6 +278,13 @@
           "title": "Category",
           "type": "string"
         },
+        "duties": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)+$"
+          },
+          "title": "Duties",
+          "type": "array"
+        },
         "id": {
           "title": "Id",
           "type": "string"
@@ -545,7 +552,7 @@
   "additionalProperties": false,
   "properties": {
     "apiVersion": {
-      "const": "policypack/v0.3",
+      "const": "policypack/v0.4",
       "title": "Apiversion",
       "type": "string"
     },
@@ -569,6 +576,6 @@
     "pack",
     "policies"
   ],
-  "title": "정책 팩 v0.3",
+  "title": "정책 팩 v0.4",
   "type": "object"
 }

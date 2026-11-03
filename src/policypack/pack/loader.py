@@ -8,6 +8,7 @@ YAML 1.2 (`ruamel.yaml`) 로 읽는다. pyyaml 은 YAML 1.1 이라 `yes`/`no`/`o
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -51,9 +52,49 @@ def load_pack(path: str | Path) -> PolicyPack:
     if not isinstance(raw, dict):
         raise PackError(f"{p}: 최상위가 매핑이 아닙니다")
     try:
-        return PolicyPack.model_validate(raw)
+        pack = PolicyPack.model_validate(raw)
     except ValidationError as e:
         raise PackError(f"{p}: 정책 팩이 문법에 맞지 않습니다\n{format_errors(e)}") from e
+    _check_duties(pack, p.parent)
+    return pack
+
+
+DUTIES_FILE = "_duties.jsonl"
+"""팩 폴더 안의 의무 설명. 한 줄에 의무 하나(JSON). 의무 지도(docs/lawmap/duties.jsonl)에서 이 팩이 가리키는 줄만
+옮긴다. 판정에는 쓰이지 않는다."""
+
+
+def load_duties(base: Path) -> dict[str, dict]:
+    """팩 폴더의 의무 설명. 파일이 없으면 빈 사전."""
+    f = base / DUTIES_FILE
+    if not f.is_file():
+        return {}
+    out: dict[str, dict] = {}
+    for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise PackError(f"{f}:{n}: JSON 이 아닙니다 ({e.msg})") from e
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            raise PackError(f"{f}:{n}: id 가 있는 객체여야 합니다")
+        if row["id"] in out:
+            raise PackError(f"{f}:{n}: 의무 id 가 중복됩니다: {row['id']}")
+        out[row["id"]] = row
+    return out
+
+
+def _check_duties(pack: PolicyPack, base: Path) -> None:
+    """정책이 가리킨 의무 id 가 팩 폴더의 _duties.jsonl 에 모두 있는가. 가리키는 의무가 없으면 보지 않는다."""
+    wanted = {(pol.id, d) for pol in pack.policies for d in pol.duties}
+    if not wanted:
+        return
+    have = load_duties(base)
+    missing = sorted(f"{pol} → {d}" for pol, d in wanted if d not in have)
+    if missing:
+        where = base / DUTIES_FILE
+        raise PackError(f"{where}: 정책이 가리킨 의무가 없습니다\n" + "\n".join(f"  {m}" for m in missing))
 
 
 def pack_digest(path: str | Path) -> str:

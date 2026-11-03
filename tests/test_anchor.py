@@ -170,7 +170,7 @@ def test_choosing_files_for_function_boundaries():
 
 
 SELECTION_PACK = """\
-apiVersion: policypack/v0.3
+apiVersion: policypack/v0.4
 pack: {id: t, title: t}
 defaults: {languages: [javascript, typescript]}
 policies:
