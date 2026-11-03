@@ -420,7 +420,7 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
     assert [(f["rule"], f["line"]) for f in doc["findings"]] == [("agent-independent", 3)]
 
     # combined: review 한 번(22-2 의 경고 단위), 그다음 정책마다 찾기. 22-2 의 찾기는 이미 본 signup.ts 를 다시 답해도
-    # 버리고, 31-1 의 찾기가 새로 찾은 파일만 경고로 더한다
+    # 버리고, 31-1 의 찾기가 새로 찾은 파일만 다시 확인(recheck)한 뒤 경고로 더한다
     (target / "chat.ts").write_text("export const reply = await openai.chat.completions.create({ model })\n")
     chat = [
         {"file": "chat.ts", "line": 1, "text": "export const reply = await openai.chat.completions.create({ model })"}
@@ -432,6 +432,7 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
         answer(),
         answer(("chat.ts", "미충족", chat, 1)),
         answer(),
+        answer(("chat.ts", "미충족", [])),  # 찾은 곳을 review 처럼 다시 묻는다
     )
     monkeypatch.setattr(agent_mod, "build", fake(send))
     assert main([*args, "--agent-mode", "combined"]) == 0
@@ -439,7 +440,9 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
     agent = doc["run"]["agent"]
     assert agent["mode"] == "combined" and agent["discover"]["mode"] == "discover"
     assert agent["discover"]["actions"] == {"dropped-known": 1, "warned": 1}
-    assert agent["total_model_calls"] == agent["model_calls"] + agent["discover"]["model_calls"] == 6
+    assert agent["recheck"]["actions"] == {"confirmed": 1}
+    calls = agent["model_calls"] + agent["discover"]["model_calls"] + agent["recheck"]["model_calls"]
+    assert agent["total_model_calls"] == calls == 7
     assert [(Path(f["file"]).name, f["policy"]) for f in doc["findings"] if f["rule"] == "agent-discovered"] == [
         ("chat.ts", "kr.ai-basic-act.31-1")
     ]

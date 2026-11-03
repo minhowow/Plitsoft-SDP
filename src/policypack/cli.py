@@ -607,7 +607,11 @@ def cmd_scan(args) -> int:
             found_more, result.agent["discover"] = run_independent(
                 agent_root, pack, duties, agent, files, known=known, rule="agent-discovered"
             )
-            result.findings.extend(found_more)
+            # 찾기 단계는 이행 근거를 덜 찾는다(dev 실측: 찾은 경고 26개 중 12개가 실제로는 충족). 찾은 곳을 review 와
+            # 같은 방식(진입 파일 + 함께 볼 파일, 인용 관문)으로 한 번 더 묻는다
+            more = EvalResult(findings=found_more)
+            result.agent["recheck"] = run_agent_pass(more, agent_root, pack, duties, agent, files)
+            result.findings.extend(more.findings)
             result.agent["mode"] = "combined"
         result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
 

@@ -202,6 +202,10 @@ def _agent_note(agent: dict) -> list[str]:
         + f" · 출력 토큰 {usage.get('output_tokens', 0):,}"
     )
     out = [head]
+    for stage, name in (("discover", "찾기"), ("recheck", "찾은 곳 재확인")):
+        if agent.get(stage):
+            acts2 = agent[stage].get("actions", {})
+            out.append(f"  {name}: " + (", ".join(f"{k} {v}" for k, v in sorted(acts2.items())) or "없음"))
     if agent.get("citations"):
         out.append(f"  인용 {agent['citations']}개 가운데 관문이 거절한 것 {agent.get('citations_rejected', 0)}개")
     if acts.get("cleared"):
