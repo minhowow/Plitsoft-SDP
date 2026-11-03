@@ -88,6 +88,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="none",
         help="정적으로 결론이 안 난 곳을 물을 AI 판정자: none(기본) | claude-cli:<모델> | anthropic:<모델>",
     )
+    sc.add_argument(
+        "--agent",
+        default=None,
+        metavar="anthropic:<모델 id>",
+        help="정적 경고를 후보 단위로 묶어 에이전트형 판정기가 관련 파일을 읽고 다시 본다(인용 관문을 거친다). "
+        "코드가 외부 API 로 나간다. ANTHROPIC_API_KEY 가 필요하다",
+    )
+    sc.add_argument("--agent-max-units", type=int, default=None, metavar="N", help="에이전트에게 물을 후보 단위 상한")
+    sc.add_argument("--agent-budget", type=int, default=20, metavar="N", help="단위당 에이전트 도구 호출 상한(기본 20)")
     sc.add_argument("--output-format", default="full", choices=["full", "concise", "json", "sarif"])
     sc.add_argument(
         "--fail-on", default="uncertain", choices=["review", "uncertain", "never"], help="무엇까지를 종료 코드 1로 볼지"
@@ -373,6 +382,17 @@ def _report_root(paths: list[Path]) -> Path:
         return Path.cwd()
 
 
+def _agent_root(files: list[Path], root: Path) -> Path:
+    """에이전트 도구가 읽을 수 있는 폴더. 보고 기준(git 루트)이 검사한 파일을 모두 품으면 그것이고, 아니면(git 밖에서
+    다른 폴더를 검사) 검사한 파일들의 공통 폴더다. 에이전트는 이 폴더 밖을 읽지 못한다."""
+    resolved = [f.resolve() for f in files]
+    root = root.resolve()
+    if all(root in f.parents for f in resolved):
+        return root
+    common = Path(os.path.commonpath([str(f) for f in resolved]))
+    return common if common.is_dir() else common.parent
+
+
 def _scope_start(paths: list[Path]) -> Path:
     """범위 검사를 할 저장소. 경로 인자가 있으면 **그 경로의** 저장소다.
 
@@ -504,6 +524,22 @@ def cmd_scan(args) -> int:
         if found.files:
             print(_egress_notice(args.judge), file=sys.stderr)
 
+    agent = None
+    if args.agent:
+        from policypack.judge.agent import build as build_agent
+
+        try:
+            agent = build_agent(args.agent, budget=args.agent_budget)
+        except ValueError as e:
+            raise ConfigError(str(e)) from e
+        if found.files:
+            print(
+                f"에이전트 검토({args.agent}): 경고가 난 파일과 관련 파일의 코드가 Anthropic API 로 나갑니다. "
+                f"단위당 도구 호출 {args.agent_budget}번까지"
+                + (f", 단위 {args.agent_max_units}개까지" if args.agent_max_units is not None else ""),
+                file=sys.stderr,
+            )
+
     if not found.files:
         print("검사할 파일이 없습니다.", file=sys.stderr)
         if args.output_format in ("json", "sarif"):
@@ -530,6 +566,15 @@ def cmd_scan(args) -> int:
             f"주의: 판정자가 연달아 {judge.GIVE_UP_AFTER}번 시간 안에 답하지 않아 남은 질문 {judge.skipped}개는 "
             f"묻지 않았습니다. 그 판정은 'AI 확인 필요'로 남습니다.",
             file=sys.stderr,
+        )
+
+    if agent is not None:
+        from policypack.evaluate.agent_pass import run_agent_pass
+        from policypack.pack.loader import load_duties
+
+        files = list(found.files)
+        result.agent = run_agent_pass(
+            result, _agent_root(files, root), pack, load_duties(base), agent, files, max_units=args.agent_max_units
         )
 
     _emit(args, result, pack, base, root, digest, n_files=len(found))

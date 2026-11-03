@@ -85,6 +85,8 @@ class Finding:
     """같은 구역 안의 모든 앵커 줄. 첫 줄이 line 이다."""
     top_level: bool = False
     """판정 구역이 함수 밖(모듈 최상위)의 줄이다. region 은 None 이다."""
+    agent: dict | None = None
+    """에이전트 검토 단계(`--agent`)의 답과 반영 결과. 그 단계를 돌리지 않았으면 None 이고 보고서에 싣지 않는다."""
 
     @property
     def ref(self) -> str:

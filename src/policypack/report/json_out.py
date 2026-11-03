@@ -54,6 +54,8 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             "incomplete": [_rel(p, root) for p in result.incomplete],
             "engine_errors": list(result.engine_errors),
             "coverage_complete": result.coverage_complete,
+            # 에이전트 검토 단계를 돌렸을 때만 싣는다(--agent). 판정기, 후보 단위, 인용 관문 결과, 사용량
+            **({"agent": result.agent} if result.agent is not None else {}),
             **(meta or {}),
         },
         "findings": [
@@ -77,6 +79,7 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
                 "anchor_lines": f.anchor_lines,
                 "unsatisfied_alternatives": f.alternatives,
                 "decision_path": f.trace,
+                **({"agent": f.agent} if f.agent is not None else {}),
             }
             for f, fp in zip(result.findings, fps, strict=True)
         ],

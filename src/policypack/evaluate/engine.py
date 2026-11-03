@@ -469,6 +469,8 @@ class EvalResult:
     구하지 못한 판정 대상 파일. 파싱 실패와 다르다."""
     engine_errors: list[str] = field(default_factory=list)
     """엔진이 어느 파일인지 밝히지 않은 오류의 원문. 그 실행의 대상은 `incomplete` 에 들어 있다."""
+    agent: dict | None = None
+    """에이전트 검토 단계(`--agent`)의 기록(evaluate.agent_pass). 돌리지 않았으면 None 이고 보고서에 싣지 않는다."""
 
     @property
     def coverage_complete(self) -> bool:
