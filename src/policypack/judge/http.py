@@ -31,6 +31,7 @@ def http_transport(key: str, timeout: float = 300.0, url: str | None = None, sle
     url = url or endpoint()
 
     def send(body: dict) -> dict:
+        timeouts = 0
         for attempt in range(5):
             req = urllib.request.Request(
                 url,
@@ -46,7 +47,18 @@ def http_transport(key: str, timeout: float = 300.0, url: str | None = None, sle
                     sleep(10 * (attempt + 1))
                     continue
                 raise RuntimeError(f"HTTP {e.code}: {detail[:300]}") from None
-            except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as e:
+            except TimeoutError:
+                # 응답이 오지 않는 요청은 한 번만 다시 보낸다. 다섯 번 기다리면 질문 하나에 25분이 간다
+                # (dev 실측: 28분 멈춤)
+                timeouts += 1
+                if timeouts < 2 and attempt < 4:
+                    continue
+                raise RuntimeError(f"연결 실패: 시간 초과({timeout:.0f}초 × {timeouts})") from None
+            except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+                if isinstance(getattr(e, "reason", None), TimeoutError):
+                    timeouts += 1
+                    if timeouts >= 2:
+                        raise RuntimeError(f"연결 실패: 시간 초과({timeout:.0f}초 × {timeouts})") from None
                 # 연결 끊김(ConnectionResetError)·응답 중간 끊김(IncompleteRead) 도 다시 보낸다(dev 실측: 끊김 하나가
                 # 검사 전체를 내부 오류로 멈췄다)
                 if attempt < 4:

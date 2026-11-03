@@ -495,3 +495,20 @@ def test_http_transport_retries_dropped_connections(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", always)
     with pytest.raises(RuntimeError, match="연결 실패"):
         http_transport("k", url="https://x", sleep=lambda s: None)({})
+
+
+def test_http_transport_gives_up_after_two_timeouts(monkeypatch):
+    import urllib.request
+
+    from policypack.judge.http import http_transport
+
+    calls = []
+
+    def hang(req, timeout):
+        calls.append(1)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", hang)
+    with pytest.raises(RuntimeError, match="시간 초과"):
+        http_transport("k", url="https://x", timeout=1, sleep=lambda s: None)({})
+    assert len(calls) == 2
