@@ -102,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="review(기본): 정적 경고를 다시 본다. combined: review 뒤에 정적 검사가 놓친 곳을 정책마다 찾는다. "
         "independent: 정적 검사 없이 정책마다 에이전트가 스스로 찾는다",
     )
+    sc.add_argument(
+        "--agent-recheck",
+        default=None,
+        metavar="anthropic:<모델 id>",
+        help="combined 에서 찾은 곳을 다시 확인할 판정기(기본: --agent 와 같은 모델). "
+        "같은 모델은 자기 답에 대개 동의한다",
+    )
     sc.add_argument("--agent-max-units", type=int, default=None, metavar="N", help="에이전트에게 물을 후보 단위 상한")
     sc.add_argument("--agent-budget", type=int, default=20, metavar="N", help="단위당 에이전트 도구 호출 상한(기본 20)")
     sc.add_argument("--output-format", default="full", choices=["full", "concise", "json", "sarif"])
@@ -535,8 +542,11 @@ def cmd_scan(args) -> int:
     if args.agent:
         from policypack.judge.agent import build as build_agent
 
+        if args.agent_recheck and args.agent_mode != "combined":
+            raise ConfigError("--agent-recheck 는 --agent-mode combined 에서만 씁니다")
         try:
             agent = build_agent(args.agent, budget=args.agent_budget)
+            checker = build_agent(args.agent_recheck, budget=args.agent_budget) if args.agent_recheck else agent
         except ValueError as e:
             raise ConfigError(str(e)) from e
         if found.files:
@@ -610,7 +620,9 @@ def cmd_scan(args) -> int:
             # 찾기 단계는 이행 근거를 덜 찾는다(dev 실측: 찾은 경고 26개 중 12개가 실제로는 충족). 찾은 곳을 review 와
             # 같은 방식(진입 파일 + 함께 볼 파일, 인용 관문)으로 한 번 더 묻는다
             more = EvalResult(findings=found_more)
-            result.agent["recheck"] = run_agent_pass(more, agent_root, pack, duties, agent, files)
+            result.agent["recheck"] = run_agent_pass(more, agent_root, pack, duties, checker, files)
+            if checker is not agent:
+                result.agent["recheck_total_usage"] = checker.usage
             result.findings.extend(more.findings)
             result.agent["mode"] = "combined"
         result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage

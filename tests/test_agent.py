@@ -486,3 +486,27 @@ def test_text_and_sarif_show_agent_results(repo):
     assert (
         "agent" not in sarif.build(plain, load_pack(KR_CORE), KR_CORE, repo)["runs"][0]["invocations"][0]["properties"]
     )
+
+
+def test_recheck_model_flag(tmp_path, monkeypatch, capsys):
+    import shutil
+
+    import policypack.judge.agent as agent_mod
+    from policypack.cli import main
+
+    target = tmp_path / "app"
+    target.mkdir()
+    shutil.copy(KR_CORE / "tests" / "pipa-22-2" / "violating.ts", target / "signup.ts")
+    built = []
+
+    def fake(spec, budget=20, env=None):
+        built.append(spec)
+        return AgentJudge(spec, scripted(), budget=budget)
+
+    monkeypatch.setattr(agent_mod, "build", fake)
+    base = ["scan", str(target), "--agent", "anthropic:a", "--output-format", "json", "--exit-zero"]
+    assert main([*base, "--agent-recheck", "anthropic:b"]) == 2  # combined 에서만
+    capsys.readouterr()
+    assert main([*base, "--agent-mode", "combined", "--agent-recheck", "anthropic:b"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert built == ["anthropic:a", "anthropic:b"] and "recheck_total_usage" in doc["run"]["agent"]
