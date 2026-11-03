@@ -184,6 +184,11 @@ def test_parse_failure_and_transport_failure(repo):
     assert AgentJudge("m", broken).ask(Q, repo).failure.startswith("transport")
     assert parse('앞 {"x": "{"} {"results": []}') == {"results": []}
     assert parse('{"verdict": "충족"}') is None
+    cut = '{"results": [{"entry": "a.ts", "verdict": "충족", "citations": [{"file": "a.ts"}]}, {"entry": "b.ts", "verd'
+    assert parse(cut) == {
+        "results": [{"entry": "a.ts", "verdict": "충족", "citations": [{"file": "a.ts"}]}],
+        "partial": True,
+    }
 
 
 def test_build_needs_key():
@@ -265,6 +270,7 @@ MADE_UP = {"file": "src/pages/Signup.tsx", "line": 1, "text": "지어낸 import 
         ("src/pages/Signup.tsx", "충족", [COMMENT]),
         ("src/pages/Signup.tsx", "해당 없음", [MADE_UP]),
         ("src/pages/Signup.tsx", "모름", []),
+        ("src/pages/Signup.tsx", "해당 없음", [AGE]),  # 해당 없음은 진입 파일의 줄이어야 한다
         ("src/other.tsx", "충족", [AGE]),  # 묻지 않은 파일에 대한 답은 쓰지 않는다
     ],
 )
@@ -316,24 +322,60 @@ def test_parse_failure_keeps_everything_and_records_raw(repo):
 # ── independent (M3) ──────────────────────────────────────────────────
 
 
+SIGNUP_LINE = {
+    "file": "src/pages/Signup.tsx",
+    "line": 3,
+    "text": "return (<form><input name='birth' /><AgeGate /></form>)",
+}
+
+
 def test_independent_makes_findings_from_agent_answers(repo):
+    (repo / "docs").mkdir()
+    (repo / "docs" / "ai.md").write_text("# 챗봇 사용법\nGPT 로 답한다\n", encoding="utf-8")
     pack, duties = load_pack(KR_CORE), load_duties(KR_CORE)
     send = scripted(
         *[answer() for _ in range(3)],
         answer(
-            ("src/pages/Signup.tsx", "미충족", [], 3),
+            ("src/pages/Signup.tsx", "미충족", [SIGNUP_LINE], 3),
             ("src/ghost.tsx", "미충족", []),
-            ("src/pages/Signup.tsx", "모름", []),
+            ("src/pages/Signup.tsx", "모름", [SIGNUP_LINE]),
+            ("docs/ai.md", "미충족", [{"file": "docs/ai.md", "line": 2, "text": "GPT 로 답한다"}]),
+            ("src/chat/Chat.tsx", "미충족", []),
+            ("src/components/AgeGate.tsx", "미충족", [SIGNUP_LINE]),
         ),
     )
-    findings, rec = run_independent(repo, pack, duties, AgentJudge("m", send))
+    files = sorted(repo.rglob("*.tsx"))
+    findings, rec = run_independent(repo, pack, duties, AgentJudge("m", send), files)
     order = [p.id for p in pack.policies]
-    assert [q["policy"] for q in rec["questions"]] == order
-    assert "스스로 찾고" in prompt_text(send)
+    assert [q["policy"] for q in rec["questions"]] == order and rec["mode"] == "independent"
+    assert "스스로 찾고" in prompt_text(send) and "이미 본 곳" not in prompt_text(send)
     assert [(f.policy, f.rule, f.outcome, f.line) for f in findings] == [
         (order[3], "agent-independent", Outcome.NEEDS_REVIEW, 3)
     ]
-    assert rec["actions"] == {"warned": 1, "dropped-no-file": 1, "dropped-duplicate": 1}
+    assert rec["actions"] == {
+        "warned": 1,
+        "dropped-no-file": 1,
+        "dropped-duplicate": 1,
+        "dropped-out-of-scope": 1,
+        "dropped-ungrounded": 2,  # 인용 없음 · 다른 파일의 줄만 인용
+    }
+    assert rec["model_calls"] == 5 and rec["usage"]["input_tokens"] == 50
+
+
+def test_discovery_skips_what_static_already_saw(repo):
+    pack, duties = load_pack(KR_CORE), load_duties(KR_CORE)
+    send = scripted(answer(("src/pages/Signup.tsx", "미충족", [SIGNUP_LINE])))
+    findings, rec = run_independent(
+        repo,
+        pack,
+        duties,
+        AgentJudge("m", send),
+        known={"kr.pipa.22-2": ["src/pages/Signup.tsx"]},
+        rule="agent-discovered",
+    )
+    assert findings == [] and rec["actions"] == {"dropped-known": 1} and rec["mode"] == "discover"
+    assert "이미 본 곳" in prompt_text(send) and "`src/pages/Signup.tsx`" in prompt_text(send)
+    assert rec["questions"][0]["known"] == 1 and rec["questions"][1]["known"] == 0
 
 
 # ── CLI ───────────────────────────────────────────────────────────────
@@ -362,19 +404,45 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
     assert main(["scan", str(target), "--agent", "anthropic:fake", "--output-format", "json", "--exit-zero"]) == 0
     out = capsys.readouterr()
     doc = json.loads(out.out)
-    assert "Anthropic API 로 나갑니다" in out.err.replace("\n", "")
+    assert "https://api.anthropic.com/v1/messages 로 나갑니다" in out.err.replace("\n", "")
     assert doc["run"]["agent"]["actions"] == {"confirmed": 1}
     assert all(f["agent"]["action"] == "confirmed" and f["outcome"] == "needs-review" for f in doc["findings"])
     assert [f["rule"] for f in doc["findings"]] == [f["rule"] for f in plain["findings"]]
 
+    cite = [{"file": "signup.ts", "line": 3, "text": "await prisma.user.create({ data: { email: body.email"}]
     monkeypatch.setattr(
-        agent_mod, "build", fake(scripted(*[answer() for _ in range(4)], answer(("signup.ts", "미충족", [], 2))))
+        agent_mod, "build", fake(scripted(*[answer() for _ in range(4)], answer(("signup.ts", "미충족", cite, 3))))
     )
-    args = ["scan", str(target), "--agent", "anthropic:fake", "--agent-mode", "independent", "--output-format", "json"]
-    assert main([*args, "--exit-zero"]) == 0
+    args = ["scan", str(target), "--agent", "anthropic:fake", "--output-format", "json", "--exit-zero"]
+    assert main([*args, "--agent-mode", "independent"]) == 0
     doc = json.loads(capsys.readouterr().out)
     assert doc["run"]["agent"]["mode"] == "independent" and doc["run"]["engine"] is None
-    assert [(f["rule"], f["line"]) for f in doc["findings"]] == [("agent-independent", 2)]
+    assert [(f["rule"], f["line"]) for f in doc["findings"]] == [("agent-independent", 3)]
+
+    # combined: review 한 번(22-2 의 경고 단위), 그다음 정책마다 찾기. 22-2 의 찾기는 이미 본 signup.ts 를 다시 답해도
+    # 버리고, 31-1 의 찾기가 새로 찾은 파일만 경고로 더한다
+    (target / "chat.ts").write_text("export const reply = await openai.chat.completions.create({ model })\n")
+    chat = [
+        {"file": "chat.ts", "line": 1, "text": "export const reply = await openai.chat.completions.create({ model })"}
+    ]
+    send = scripted(
+        answer(("signup.ts", "미충족", [])),
+        answer(("signup.ts", "미충족", cite, 3)),
+        answer(),
+        answer(),
+        answer(("chat.ts", "미충족", chat, 1)),
+        answer(),
+    )
+    monkeypatch.setattr(agent_mod, "build", fake(send))
+    assert main([*args, "--agent-mode", "combined"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    agent = doc["run"]["agent"]
+    assert agent["mode"] == "combined" and agent["discover"]["mode"] == "discover"
+    assert agent["discover"]["actions"] == {"dropped-known": 1, "warned": 1}
+    assert agent["total_model_calls"] == agent["model_calls"] + agent["discover"]["model_calls"] == 6
+    assert [(Path(f["file"]).name, f["policy"]) for f in doc["findings"] if f["rule"] == "agent-discovered"] == [
+        ("chat.ts", "kr.ai-basic-act.31-1")
+    ]
 
 
 def test_text_and_sarif_show_agent_results(repo):

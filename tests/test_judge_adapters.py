@@ -419,3 +419,79 @@ def test_questions_sent_are_counted_apart_from_questions_asked():
     for _ in range(3):
         judge.ask(q)
     assert judge.sent == inner.calls == 1
+
+
+def test_api_judge_drops_temperature_when_the_model_refuses_it():
+    """5.5 세대 모델은 temperature 를 받지 않는다(400). 한 번 빼고 다시 보내고, 그 뒤로는 넣지 않는다."""
+    from policypack.judge.anthropic_api import AnthropicApiJudge
+
+    sent = []
+
+    def send(body):
+        sent.append(dict(body))
+        if "temperature" in body:
+            raise RuntimeError('HTTP 400: {"message": "`temperature` is deprecated for this model."}')
+        return {
+            "content": [{"type": "text", "text": '{"answer": "아니오", "evidence": ""}'}],
+            "usage": {"input_tokens": 7, "output_tokens": 2},
+        }
+
+    j = AnthropicApiJudge("haiku", api_key="k", transport=send)
+    assert j.ask(Q).raw == "아니오" and j.ask(Q).raw == "아니오"
+    assert j.usage == {"input_tokens": 14, "output_tokens": 4}
+    assert ["temperature" in b for b in sent] == [True, False, False]
+    assert sent[0]["model"] == "claude-haiku-5-5"
+
+
+def test_api_judge_transport_errors_are_soft():
+    from policypack.judge.anthropic_api import AnthropicApiJudge
+
+    def boom(body):
+        raise RuntimeError("연결 실패: timed out")
+
+    assert AnthropicApiJudge("haiku", api_key="k", transport=boom).ask(Q).failure == "timeout"
+
+
+def test_http_endpoint_follows_base_url():
+    from policypack.judge.http import endpoint
+
+    assert endpoint({}) == "https://api.anthropic.com/v1/messages"
+    assert endpoint({"ANTHROPIC_BASE_URL": "https://gw.example.com/anthropic/"}) == (
+        "https://gw.example.com/anthropic/v1/messages"
+    )
+
+
+def test_http_transport_retries_dropped_connections(monkeypatch):
+    import json as _json
+    import urllib.request
+
+    from policypack.judge.http import http_transport
+
+    calls = []
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return _json.dumps({"content": []}).encode()
+
+    def fake(req, timeout):
+        calls.append(1)
+        if len(calls) < 3:
+            raise ConnectionResetError(54, "Connection reset by peer")
+        return Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    assert http_transport("k", url="https://x", sleep=lambda s: None)({}) == {"content": []}
+    assert len(calls) == 3
+
+    def always(req, timeout):
+        raise ConnectionResetError(54, "reset")
+
+    monkeypatch.setattr(urllib.request, "urlopen", always)
+    with pytest.raises(RuntimeError, match="연결 실패"):
+        http_transport("k", url="https://x", sleep=lambda s: None)({})

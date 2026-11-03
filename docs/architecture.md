@@ -56,9 +56,9 @@ Semgrep CE ─┘                         에이전트형 판정 (Claude API, �
 | 후보 단위: 진입 파일 + 관련 파일 | `index/units.py` | 새로 | 9–10 | 끝(224e815) |
 | 에이전트형 판정기: 도구 3개, 예산, 구조화 응답 | `judge/agent.py` | 새로 | 10 | 끝(dc23f2c). dev 1곳 3단위로 실제 호출 확인 |
 | 인용 관문을 여러 파일 인용으로 | `evaluate/agent_pass.py` (evidence.py 를 씀) | 새로 | 10 | 끝(dc23f2c) |
-| 원본 정적 결과 보존, AI 결과와 나란히 보고 | `report/` | 고침 | 10 | JSON 만(run.agent, findings[].agent). 글·SARIF 는 아직 |
-| 독립 AI 검토(정적 후보 없이), 중복 정리 | `judge/`, `evaluate/` | 새로 | 11 | |
-| 외부 전송 통제: 마스킹, 전송 목록 | `egress.py` | 새로 | 12 | |
+| 원본 정적 결과 보존, AI 결과와 나란히 보고 | `report/` | 고침 | 10 | 끝(8cd5048). JSON·글·SARIF |
+| 독립 AI 검토(정적 후보 없이), 중복 정리 | `judge/`, `evaluate/` | 새로 | 11 | 끝(8cd5048). `--agent-mode independent` |
+| 외부 전송 통제: 마스킹, 전송 목록 | `egress.py` | 새로 | 12 | 끝(8cd5048). 전화·이메일은 이행 근거라 가리지 않음 |
 | Claude Code 훅, GitLab Code Quality 출력 | `integrations/`, `report/` | 새로 | 13 | |
 
 #### 알게 된 것 (11/3 실제 호출)

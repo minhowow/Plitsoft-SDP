@@ -16,9 +16,6 @@ dependencies = [
     "ruamel.yaml>=0.18",
 ]
 
-[project.optional-dependencies]
-api = ["anthropic>=0.40"]   # anthropic:<모델> 판정자에만 필요
-
 [project.scripts]
 policypack = "policypack.cli:main"
 

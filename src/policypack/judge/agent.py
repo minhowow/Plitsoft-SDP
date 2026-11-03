@@ -19,15 +19,12 @@ import fnmatch
 import json
 import os
 import re
-import time
-import urllib.error
-import urllib.request
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from policypack.egress import is_secret_file, mask
+from policypack.judge.http import Transport, http_transport
 
 Verdict = Literal["compliant", "not-compliant", "not-applicable", "unknown"]
 VERDICTS: dict[str, Verdict] = {
@@ -36,8 +33,9 @@ VERDICTS: dict[str, Verdict] = {
     "해당 없음": "not-applicable",
     "모름": "unknown",
 }
-API = "https://api.anthropic.com/v1/messages"
-MAX_TOKENS = 2048
+MAX_TOKENS = 8192
+"""답이 진입 파일 여러 개를 다루면 길다(dev 실측: 다섯 개짜리 답이 2048 에서 잘렸다). 쓴 만큼만 청구된다."""
+SCAN_EXTS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
 SKIP_DIRS = {".git", "node_modules", "dist", "build", ".next", "out", "coverage", ".turbo", ".cache", "vendor", ".yarn"}
 READ_LINES, READ_CHARS, SEARCH_HITS, LIST_MAX, FILE_MAX = 300, 30_000, 60, 400, 1_000_000
 
@@ -121,8 +119,9 @@ PROMPT_INDEPENDENT = """이 저장소에서 아래 의무가 걸리는 처리를
 
 {duty}
 
-## 하는 일
+{known}## 하는 일
 1. 파일 목록과 검색으로 의무가 걸리는 처리가 있는 파일을 찾는다(화면, 서버 경로, 전송 함수 등).
+   검사 대상은 JS·TS 파일({exts})이다. 다른 언어 파일과 문서는 답하지 않는다.
 2. 찾은 파일마다 이행하는 처리를 같은 앱의 코드에서 찾는다.
 3. 도구는 모두 {budget}번까지 쓸 수 있다. 의무가 걸리는 처리가 없으면 빈 목록으로 답한다.
    같은 흐름의 파일이 여럿이면 처리가 일어나는 대표 파일 하나로 묶는다. 많아야 {max_results}개까지 답한다.
@@ -268,6 +267,8 @@ class AgentQuestion:
     """같은 (저장소, 정책)의 앞 묶음에서 관문을 통과한 이행 근거. 다음 묶음이 다시 확인하도록 알려 준다."""
     mode: Literal["review", "independent"] = "review"
     max_results: int = 8
+    known: tuple[str, ...] = ()
+    """independent 에서 이미 다른 단계(정적 검사·review)가 본 파일. 다시 답하지 않게 알린다(결합 방식의 찾기)."""
 
     def _duty(self) -> str:
         duty_text = (
@@ -286,8 +287,23 @@ class AgentQuestion:
 
     def prompt(self, budget: int) -> str:
         if self.mode == "independent":
+            known = ""
+            if self.known:
+                listed = "\n".join(f"- `{k}`" for k in self.known[:40])
+                more = f"\n- … 외 {len(self.known) - 40}개" if len(self.known) > 40 else ""
+                known = (
+                    "## 이미 본 곳\n정적 검사가 이 정책으로 이미 찾아 검토한 파일이다. 이 파일들은 답하지 않는다. "
+                    "같은 의무가 걸리는데 정적 검사가 놓친 다른 파일(서버 경로, 다른 화면, 흐름의 앞뒤 단계)을 "
+                    "찾는다.\n"
+                    f"{listed}{more}\n\n"
+                )
             return PROMPT_INDEPENDENT.format(
-                duty=self._duty(), budget=budget, max_results=self.max_results, rules=ANSWER_RULES
+                duty=self._duty(),
+                budget=budget,
+                max_results=self.max_results,
+                rules=ANSWER_RULES,
+                known=known,
+                exts=", ".join(SCAN_EXTS),
             )
         entries = "\n".join(
             f"- `{e.path}`" + (f" (정적 신호가 걸린 줄: {', '.join(map(str, e.lines))})" if e.lines else "")
@@ -329,6 +345,8 @@ class EntryResult:
 class AgentAnswer:
     results: list[EntryResult] = field(default_factory=list)
     failure: str | None = None
+    calls: int = 0
+    """이 질문에 쓴 모델 호출 수(대화의 턴 수)."""
     tool_calls: int = 0
     budget: int = 0
     usage: dict = field(default_factory=dict)
@@ -337,55 +355,35 @@ class AgentAnswer:
     searches: list[str] = field(default_factory=list)
     masked: dict = field(default_factory=dict)
     raw: str = ""
+    stop_reason: str | None = None
+    partial: bool = False
+    """답 전체가 JSON 으로 읽히지 않아 온전한 항목만 건졌다."""
 
     def for_entry(self, path: str) -> EntryResult | None:
         return next((r for r in self.results if r.entry == path), None)
 
 
 def parse(text: str) -> dict | None:
-    """답에서 "results" 목록을 가진 JSON 객체를 찾는다. 앞뒤 글이 붙어 있어도 된다."""
+    """답에서 "results" 목록을 가진 JSON 객체를 찾는다. 앞뒤 글이 붙어 있어도 된다.
+
+    전체가 읽히지 않으면(답이 길이 상한에서 잘린 경우 등) 온전한 결과 객체({"entry", "verdict", …})만 모아
+    `{"results": [...], "partial": true}` 로 돌려준다. 잘린 마지막 항목은 버린다."""
     dec = json.JSONDecoder()
     start = text.find("{")
+    pieces = []
     while start != -1:
         try:
-            doc, _ = dec.raw_decode(text, start)
+            doc, end = dec.raw_decode(text, start)
         except json.JSONDecodeError:
-            doc = None
+            doc, end = None, start + 1
         if isinstance(doc, dict) and isinstance(doc.get("results"), list):
             return doc
+        if isinstance(doc, dict) and "entry" in doc and "verdict" in doc:
+            pieces.append(doc)
+            start = text.find("{", end)
+            continue
         start = text.find("{", start + 1)
-    return None
-
-
-Transport = Callable[[dict], dict]
-"""요청 본문을 받아 Messages API 응답(JSON)을 돌려주는 함수. 시험에서는 가짜를 넣는다."""
-
-
-def http_transport(key: str, timeout: float = 300.0) -> Transport:
-    def send(body: dict) -> dict:
-        for attempt in range(5):
-            req = urllib.request.Request(
-                API,
-                data=json.dumps(body).encode(),
-                headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=timeout) as r:
-                    return json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                detail = e.read().decode(errors="replace")
-                if e.code in (429, 500, 502, 503, 529) and attempt < 4:
-                    time.sleep(10 * (attempt + 1))
-                    continue
-                raise RuntimeError(f"HTTP {e.code}: {detail[:300]}") from None
-            except (urllib.error.URLError, TimeoutError) as e:
-                if attempt < 4:
-                    time.sleep(10 * (attempt + 1))
-                    continue
-                raise RuntimeError(f"연결 실패: {e}") from None
-        raise RuntimeError("재시도 끝")
-
-    return send
+    return {"results": pieces, "partial": True} if pieces else None
 
 
 def _cached(messages: list) -> list:
@@ -440,11 +438,13 @@ class AgentJudge:
                 ans.failure = f"transport: {e}"
                 break
             self.calls += 1
+            ans.calls += 1
             for k, v in (resp.get("usage") or {}).items():
                 if isinstance(v, int):
                     ans.usage[k] = ans.usage.get(k, 0) + v
                     self.usage[k] = self.usage.get(k, 0) + v
             content = resp.get("content") or []
+            ans.stop_reason = resp.get("stop_reason")
             ans.transcript.append({"sent_tail": messages[-1], "received": content})
             messages.append({"role": "assistant", "content": content})
             uses = [b for b in content if b.get("type") == "tool_use"]
@@ -470,6 +470,7 @@ class AgentJudge:
         if doc is None:
             ans.failure = "parse"
             return ans
+        ans.partial = bool(doc.get("partial"))
         for r in doc["results"]:
             if not isinstance(r, dict) or not isinstance(r.get("entry"), str) or r.get("verdict") not in VERDICTS:
                 continue

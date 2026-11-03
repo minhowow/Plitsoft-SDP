@@ -98,8 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument(
         "--agent-mode",
         default="review",
-        choices=["review", "independent"],
-        help="review(기본): 정적 경고를 다시 본다. independent: 정적 검사 없이 정책마다 에이전트가 스스로 찾는다",
+        choices=["review", "combined", "independent"],
+        help="review(기본): 정적 경고를 다시 본다. combined: review 뒤에 정적 검사가 놓친 곳을 정책마다 찾는다. "
+        "independent: 정적 검사 없이 정책마다 에이전트가 스스로 찾는다",
     )
     sc.add_argument("--agent-max-units", type=int, default=None, metavar="N", help="에이전트에게 물을 후보 단위 상한")
     sc.add_argument("--agent-budget", type=int, default=20, metavar="N", help="단위당 에이전트 도구 호출 상한(기본 20)")
@@ -539,9 +540,11 @@ def cmd_scan(args) -> int:
         except ValueError as e:
             raise ConfigError(str(e)) from e
         if found.files:
+            from policypack.judge.http import endpoint
+
             print(
-                f"에이전트 검토({args.agent}, {args.agent_mode}): 에이전트가 읽은 파일의 코드가 Anthropic API 로 "
-                f"나갑니다(비밀값은 가리고 .env 등은 읽지 않음). "
+                f"에이전트 검토({args.agent}, {args.agent_mode}): 에이전트가 읽은 파일의 코드가 "
+                f"{_redact(endpoint())} 로 나갑니다(비밀값은 가리고 .env 등은 읽지 않음). "
                 f"단위당 도구 호출 {args.agent_budget}번까지"
                 + (f", 단위 {args.agent_max_units}개까지" if args.agent_max_units is not None else ""),
                 file=sys.stderr,
@@ -564,9 +567,9 @@ def cmd_scan(args) -> int:
         from policypack.pack.loader import load_duties
 
         result = EvalResult(judge_id="", skipped=[str(p) for p in found.skipped_files()])
-        result.findings, result.agent = run_independent(
-            _agent_root(list(found.files), root), pack, load_duties(base), agent
-        )
+        files = list(found.files)
+        result.findings, result.agent = run_independent(_agent_root(files, root), pack, load_duties(base), agent, files)
+        result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
         _emit(args, result, pack, base, root, digest, n_files=len(found))
         return _exit_code(args, result.findings, found)
 
@@ -580,6 +583,7 @@ def cmd_scan(args) -> int:
     result.skipped = [str(p) for p in found.skipped_files()]
     result.questions_sent = getattr(judge, "sent", 0)
     result.questions_skipped = getattr(judge, "skipped", 0)
+    result.judge_usage = getattr(getattr(judge, "inner", None), "usage", None) or None
     if getattr(judge, "skipped", 0):
         print(
             f"주의: 판정자가 연달아 {judge.GIVE_UP_AFTER}번 시간 안에 답하지 않아 남은 질문 {judge.skipped}개는 "
@@ -591,10 +595,21 @@ def cmd_scan(args) -> int:
         from policypack.evaluate.agent_pass import run_agent_pass
         from policypack.pack.loader import load_duties
 
-        files = list(found.files)
-        result.agent = run_agent_pass(
-            result, _agent_root(files, root), pack, load_duties(base), agent, files, max_units=args.agent_max_units
-        )
+        files, duties = list(found.files), load_duties(base)
+        agent_root = _agent_root(files, root)
+        result.agent = run_agent_pass(result, agent_root, pack, duties, agent, files, max_units=args.agent_max_units)
+        if args.agent_mode == "combined":
+            from policypack.evaluate.agent_pass import run_independent
+
+            known: dict[str, list[str]] = {}
+            for r in result.agent["records"]:
+                known.setdefault(r["policy"], []).append(r["entry"])
+            found_more, result.agent["discover"] = run_independent(
+                agent_root, pack, duties, agent, files, known=known, rule="agent-discovered"
+            )
+            result.findings.extend(found_more)
+            result.agent["mode"] = "combined"
+        result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
 
     _emit(args, result, pack, base, root, digest, n_files=len(found))
     return _exit_code(args, result.findings, found)

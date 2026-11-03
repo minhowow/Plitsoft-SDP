@@ -4,7 +4,9 @@ CLI 어댑터와 **같은 프롬프트, 같은 시스템 메시지**를 쓴다. 
 CLI 판정자는 키가 필요 없지만 `claude` 가 깔려 있어야 하고 입력에 CLI 가 기본으로 붙이는 내용이 함께 들어간다.
 이쪽은 우리가 보낸 것만 들어간다.
 
-`temperature=0` 으로 둔다. 같은 질문에 같은 답이 나올 확률을 최대한 높인다(보장되지는 않는다).
+`temperature=0` 으로 보낸다. 같은 질문에 같은 답이 나올 확률을 높인다(보장되지는 않는다). 5.5 세대 모델은
+temperature 를 받지 않아(400, 2026-11-03 실측) 그 모델에는 빼고 다시 보낸다.
+SDK 없이 표준 라이브러리로 부른다(judge/http.py).
 """
 
 from __future__ import annotations
@@ -12,12 +14,13 @@ from __future__ import annotations
 import os
 
 from policypack.judge.base import SYSTEM, Answer, Failure, OncePerRun, Question, parse_answer
+from policypack.judge.http import Transport, http_transport
 
-#: 별칭 → 모델 id.
+#: 별칭 → 모델 id. 평가처럼 다시 돌려야 하는 실행에는 전체 id 를 쓴다.
 MODELS = {
-    "haiku": "claude-haiku-4-5-20251001",
-    "sonnet": "claude-sonnet-5",
-    "opus": "claude-opus-5",
+    "haiku": "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "opus": "claude-opus-5-5",
 }
 
 MAX_TOKENS = 512
@@ -32,6 +35,7 @@ class AnthropicApiJudge:
         timeout: float = 120.0,
         max_tokens: int = MAX_TOKENS,
         api_key: str | None = None,
+        transport: Transport | None = None,
     ) -> None:
         self.model_id = MODELS.get(model, model)
         self.id = f"anthropic:{model}"
@@ -39,38 +43,50 @@ class AnthropicApiJudge:
         self.timeout = timeout
         self.max_tokens = max_tokens
         self._key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        self._client = None
+        self._send = transport
+        self._temperature = True
+        self.usage: dict[str, int] = {}
+        """보낸 질문들의 토큰 사용량 합. 보고서 run.judge_usage 에 싣는다(비용 비교용)."""
 
-    def _connect(self):
-        if self._client is not None:
-            return self._client
-        if not self._key:
-            raise RuntimeError("ANTHROPIC_API_KEY 가 없습니다. claude-cli 판정자를 쓰거나 키를 설정하세요.")
-        try:
-            import anthropic
-        except ImportError as e:  # pragma: no cover - 설치 여부에 달림
-            raise RuntimeError("anthropic 패키지가 없습니다. `uv sync --all-extras` 로 설치하세요.") from e
-        self._client = anthropic.Anthropic(api_key=self._key, timeout=self.timeout)
-        return self._client
+    def _connect(self) -> Transport:
+        if self._send is None:
+            if not self._key:
+                raise RuntimeError("ANTHROPIC_API_KEY 가 없습니다. claude-cli 판정자를 쓰거나 키를 설정하세요.")
+            self._send = http_transport(self._key, timeout=self.timeout)
+        return self._send
 
     def ask(self, q: Question) -> Answer:
         try:
-            client = self._connect()
+            send = self._connect()
         except RuntimeError:
             return self._fail("transport")
+        body = {
+            "model": self.model_id,
+            "max_tokens": self.max_tokens,
+            "system": self.system,
+            "messages": [{"role": "user", "content": q.prompt()}],
+        }
+        for _ in range(2):
+            if self._temperature:
+                body["temperature"] = 0
+            else:
+                body.pop("temperature", None)
+            try:
+                msg = send(body)
+                break
+            except RuntimeError as e:
+                text = str(e)
+                if self._temperature and "temperature" in text:
+                    self._temperature = False  # 이 모델은 temperature 를 받지 않는다
+                    continue
+                return self._fail("timeout" if "timed out" in text.lower() else "transport")
+        else:
+            return self._fail("transport")
 
-        try:
-            msg = client.messages.create(
-                model=self.model_id,
-                max_tokens=self.max_tokens,
-                temperature=0,
-                system=self.system,
-                messages=[{"role": "user", "content": q.prompt()}],
-            )
-        except Exception as e:  # noqa: BLE001 - SDK 예외 종류가 많다
-            return self._fail("timeout" if "timeout" in type(e).__name__.lower() else "transport")
-
-        text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+        for k, v in (msg.get("usage") or {}).items():
+            if isinstance(v, int):
+                self.usage[k] = self.usage.get(k, 0) + v
+        text = "".join(b.get("text", "") for b in msg.get("content") or [] if b.get("type") == "text")
         raw, evidence, parse_failed = parse_answer(text)
         return Answer(raw=raw, evidence=evidence, failure="parse" if parse_failed else None)
 
@@ -112,11 +128,6 @@ def preflight(spec: str) -> str | None:
                 f"claude 실행 파일을 찾지 못했습니다({claude_cli.BIN}). "
                 "설치하거나 POLICYPACK_CLAUDE_BIN 에 경로를 주세요"
             )
-    if kind == "anthropic":
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return "ANTHROPIC_API_KEY 가 없습니다. 키를 설정하거나 claude-cli 판정자를 쓰세요"
-        try:
-            import anthropic  # noqa: F401
-        except ImportError:
-            return "anthropic 패키지가 없습니다. `uv sync --extra api` 로 설치하세요"
+    if kind == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
+        return "ANTHROPIC_API_KEY 가 없습니다. 키를 설정하거나 claude-cli 판정자를 쓰세요"
     return None

@@ -124,6 +124,7 @@ uv run policypack scan src/ --output-format sarif # 근거 조문이 help.markdo
 uv run policypack scan --staged                    # 스테이징된 파일만 (커밋 전 훅)
 uv run policypack scan --diff origin/main          # 분기점 이후 이 브랜치가 바꾼 파일만 (CI)
 uv run policypack scan src/ --judge claude-cli:haiku  # 정적으로 결론이 안 난 곳만 AI 에게 묻는다
+uv run policypack scan . --agent anthropic:claude-haiku-5-5  # 경고를 에이전트가 관련 파일까지 읽고 다시 본다(실험 중)
 uv run policypack validate                        # 팩 문법·Semgrep 조건·조문 원문 해시·재검토 기한
 uv run policypack test --strict                   # 팩의 픽스처 (모델 호출 0회)
 uv run policypack doctor                          # 정적 백엔드 진단
@@ -248,6 +249,16 @@ policypack 은 **MIT** 다(LICENSE). 자세한 목록은 [NOTICE](NOTICE) 에 �
 
 실행할 때 stderr 에 이 사실을 알린다.
 
+에이전트 검토(`--agent`, 실험 중)를 켜면 에이전트가 도구로 **고른 파일**이 나간다. 경고가 난 파일에서 시작해
+같은 저장소의 다른 파일을 읽고 검색하므로, 판정자보다 넓다. 그래서 나가기 전에 이렇게 한다(`egress.py`).
+
+- 개인키, 알려진 키 모양(AWS·GitHub·Slack·Google·`sk-…` 등), JWT, 비밀처럼 이름 붙은 변수의 긴 문자열,
+  주민등록번호·카드 번호 모양을 `[가림:<종류>]` 로 바꾼다.
+- `.env`·`.env.local`·`*.pem`·`*.key`·`id_rsa` 같은 파일은 읽지 않는다(`.env.example` 은 읽는다).
+- 에이전트가 읽은 파일, 검색어, 가린 수를 질문마다 JSON 보고서 `run.agent.questions[].sent` 에 남긴다.
+- 전화번호·이메일·회사 이름은 가리지 않는다. 광고 전송자 연락처처럼 의무를 이행하는 근거라서다. 가린 것도
+  모양으로 찾는 것이라 빠지는 비밀값이 있을 수 있다.
+
 판정자 CLI·SDK 는 사용자가 해 둔 설정을 따른다. `ANTHROPIC_BASE_URL`·Bedrock·Vertex 설정이 있으면
 목적지가 바뀌고, Claude Code 텔레메트리 설정(`OTEL_LOG_USER_PROMPTS` 등)이 있으면 그 수집기에도
 기록이 갈 수 있다. 사내 게이트웨이가 필수인 경우가 있어 끊지 않고, 고지에 실제 목적지를 함께 적는다.
@@ -276,10 +287,25 @@ Opengrep(Semgrep CE 의 LGPL-2.1 포크)으로 갈아탈 수도 있다. 라이�
 프론티어 모델만 쓴다. 어댑터는 두 개다.
 
 - `claude-cli:<모델>` — `claude` CLI를 단발 판정자로 부른다. API 키가 필요 없다.
-- `anthropic:<모델>` — `ANTHROPIC_API_KEY` 를 쓴다(`uv sync --extra api` 로 SDK 를 설치).
+- `anthropic:<모델>` — `ANTHROPIC_API_KEY` 를 쓴다. SDK 없이 표준 라이브러리로 부른다. 별칭 haiku·sonnet·opus 는
+  5.5 세대(`claude-haiku-5-5` 등)를 가리킨다. 다시 돌려야 하는 실행에는 전체 모델 id 를 쓴다.
 
 두 경우 모두 **판정 대상 코드가 외부 API로 나간다**(범위는 "외부 통신" 절). 개인정보 점검 도구의 성질상
 이 점은 쓰기 전에 알아야 한다. 한 번 실행하는 동안 같은 질문을 같은 코드로 두 번 묻지 않는다.
+
+### 에이전트 검토 (`--agent anthropic:<모델 id>`, 실험 중)
+
+판정자는 파일(또는 함수) 하나만 본다. 법 의무는 서비스에 붙어서 고지는 약관 화면에, 나이 확인은 가입 앞 단계에
+있을 수 있다. 에이전트 검토는 정적 경고를 (정책, 진입 파일)로 묶고, 저장소 색인(import 관계, 파일 역할)이 고른
+관련 파일과 함께 묻는다. 에이전트는 읽기 전용 도구 셋(파일 목록·읽기·검색, 저장소 밖 금지)으로 찾아 읽고 파일마다
+충족·미충족·해당 없음·모름과 인용으로 답한다.
+
+- 충족·해당 없음은 인용 하나 이상이 근거 관문을 통과해야 경고를 푼다. 인용은 여러 파일에 걸칠 수 있다.
+- 미충족은 '불확실'을 '검토 필요'로 올린다. 모름·실패는 정적 판정을 그대로 둔다.
+- 같은 정책의 진입 파일은 한 대화에서 묻는다(6개씩). 따로 물으면 같은 서비스에 대해 서로 다른 답이 나왔다.
+- `--agent-mode independent` 는 정적 검사 없이 정책마다 에이전트가 스스로 찾는다(평가의 비교군).
+- `--agent-max-units`, `--agent-budget`(단위당 도구 호출, 기본 20)으로 비용을 묶는다. 호출 수와 토큰은 요약과
+  JSON(`run.agent`)에 나온다. `--agent` 를 주지 않으면 이 단계는 돌지 않고 보고서도 그대로다.
 
 ## 저장소 구성
 

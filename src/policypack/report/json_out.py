@@ -55,6 +55,7 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             "engine_errors": list(result.engine_errors),
             "coverage_complete": result.coverage_complete,
             # 에이전트 검토 단계를 돌렸을 때만 싣는다(--agent). 판정기, 후보 단위, 인용 관문 결과, 사용량
+            **({"judge_usage": result.judge_usage} if result.judge_usage else {}),
             **({"agent": result.agent} if result.agent is not None else {}),
             **(meta or {}),
         },
