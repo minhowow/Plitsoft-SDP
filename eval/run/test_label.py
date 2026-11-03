@@ -106,3 +106,19 @@ def test_cache_mark_and_price():
     assert out[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
     assert msgs[0]["content"] == "a"
     assert label.price("claude-opus-5-5", {"input_tokens": 1_000_000}) == 15.0
+
+
+def test_disputed_block():
+    assert label.disputed_block({"file": "a", "policy": "p"}) == ""
+    u = {
+        "answers": [
+            {"label_ko": "검토 필요", "reason": "r1", "citations": [{"file": "a.ts", "line": 3, "text": "x()"}]},
+            {"label_ko": "충족 근거 있음", "reason": "r2", "citations": []},
+        ]
+    }
+    text = label.disputed_block(u)
+    assert (
+        "두 라벨러의 답이 갈렸다" in text
+        and "답 1: 검토 필요 — r1 (인용: a.ts:3 x())" in text
+        and "답 2: 충족 근거 있음" in text
+    )

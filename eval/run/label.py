@@ -5,7 +5,8 @@
         --out OUTDIR [--max-usd 5] [--workers 4] [--only N]
 
   DIR        저장소마다 폴더 하나(<owner>__<name>). units.json 의 file 은 "<폴더>/<저장소 안 경로>"
-  units.json units.py 의 출력. [{file, policy, source}]
+  units.json units.py 의 출력. [{file, policy, source}]. adjudicate.py 의 disputes.json 을 주면 조정자로 돈다
+             (두 라벨러의 답을 지시문 끝에 붙인다. 판정 기준은 같다)
   OUTDIR     단위마다 기록 하나(raw/<번호>.json: 보낸 것·받은 것 전부, 사용량), labels.jsonl(채점용 한 줄씩)
 
 지시문은 guide/labeller-prompt.md 에 정책 절(guide/LABEL_GUIDE.md 의 "## 정책 <id>" 부터 다음 "## 정책" 앞까지)을
@@ -209,6 +210,29 @@ def prompt(template: str, guide: str, repo: str, start: str, policy: str) -> str
     )
 
 
+ADJUDICATE = """
+
+## 조정: 앞선 두 라벨러의 답
+이 단위는 두 라벨러의 답이 갈렸다. 두 답과 근거를 참고하되, 저장소를 직접 읽어 확인하고 위 기준대로 하나를 고른다.
+어느 답을 따를지가 아니라 기준서가 정하는 값을 고른다. 답의 형식은 위와 같다.
+{answers}"""
+
+
+def disputed_block(u: dict) -> str:
+    """adjudicate.py 가 낸 갈린 단위면 두 답을 붙인다. 보통 단위면 빈 글."""
+    if not u.get("answers"):
+        return ""
+    lines = []
+    for i, ans in enumerate(u["answers"], 1):
+        cites = "; ".join(
+            f"{c.get('file')}:{c.get('line')} {str(c.get('text', ''))[:120]}" for c in ans.get("citations") or []
+        )
+        lines.append(
+            f"- 답 {i}: {ans.get('label_ko')} — {ans.get('reason') or ''}" + (f" (인용: {cites})" if cites else "")
+        )
+    return ADJUDICATE.format(answers="\n".join(lines))
+
+
 # ── API ──────────────────────────────────────────────────────────────
 
 
@@ -371,7 +395,7 @@ def main() -> None:
                 return
         folder, rel = u["file"].split("/", 1)
         repo = Repo(a.repos / folder)
-        text = prompt(template, guide, folder.replace("__", "/", 1), rel, u["policy"])
+        text = prompt(template, guide, folder.replace("__", "/", 1), rel, u["policy"]) + disputed_block(u)
         t0 = time.time()
         try:
             res = label_unit(api, repo, text)
