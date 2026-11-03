@@ -44,3 +44,16 @@
 head 7300205, M1, 9/30 표본 test 21개: 정밀도 0.50, 재현율 0.19, F1 0.28(저장소 부트스트랩 0.00–0.56).
 9/30 측정에서 M2(haiku)는 정밀도 0.60, F1 0.31. 재현의 원자료는 `~/.cache/policypack-eval/midterm-2026-10-14/`.
 같은 자료를 쌍 단위(`eval/scripts/compare.py`)로 세면 M1 F1 0.48, M2 0.43(저장소 18곳)이다.
+
+## 실행 도구 (고정 대상 밖, `eval/run/`)
+
+고정한 `eval/` 파일(H0)은 고치지 않는다. 11/30 에 고정할 실행 도구는 `eval/run/` 에 둔다.
+
+| 파일 | 하는 일 |
+|---|---|
+| `label.py` | 라벨러 한 명. 읽기 전용 도구 셋, 단위당 30번, 누적 비용 상한, 원 응답 보존, 인용 원문 확인. 갈린 단위를 주면 조정자로 돈다 |
+| `adjudicate.py` | 두 라벨러를 합치고(카파), 갈린 단위를 조정 대상으로 내고, 조정 답으로 정한다 |
+| `methods.py` | M1~M4 를 대기열 순서로 돌리고 비용 상한에서 멈춘다. 네 방식을 모두 마친 앞부분만 `prefix.json` 에 적는다 |
+
+순서(12/1~): `units.py` → `label.py`(A, B) → `adjudicate.py merge` → `label.py`(조정) → `adjudicate.py merge --adj`
+→ `methods.py` → 경고 단위 라벨(같은 순서) → `audit_sample.py` → 사람 라벨 → `compare.py`·`score.py`.
