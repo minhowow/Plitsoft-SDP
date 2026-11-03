@@ -8,7 +8,7 @@
 | [direction.md](direction.md) | 방향 A 한 장: 무엇을 만들고 무엇을 하지 않는가 | 방향이 바뀔 때 |
 | [architecture.md](architecture.md) | 지금 구조(7300205)와 바꿀 구조, 모듈별 할 일 | 모듈을 더하거나 이음매를 바꿀 때 |
 | [roadmap.md](roadmap.md) | 9~16주 일정, 연구계획서 주차와의 대응 | 매주 지도교수 면담 뒤 |
-| [evaluation.md](evaluation.md) | 네 방식 비교 실험의 설계와 고정 날짜 | 고정(11/9, 11/30) 전까지만 |
+| [evaluation.md](evaluation.md) | 네 방식 비교 실험의 요약. 고정되는 계획서는 [../eval/PROTOCOL.md](../eval/PROTOCOL.md) | 고정(11/9, 11/30) 전까지만 |
 | [decisions/](decisions/) | 되돌리기 어려운 결정 기록(ADR) | 결정할 때 하나씩 더한다 |
 | [lawmap/](lawmap/) | 국내 법 의무 지도(795개)와 데이터 | 의무를 다시 조사할 때 |
 | [reports/](reports/) | 중간·결과 보고서와 발표 자료의 위치 | 제출할 때 |

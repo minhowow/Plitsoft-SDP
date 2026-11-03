@@ -1,0 +1,31 @@
+{
+ "_note": "2026-10-06 광고 후보 조사 37개 가운데 개발용 11개를 뺀 보류분. 무작위 추출이 아니다. 동결 전에 내려받거나 열지 않는다.",
+ "repos": [
+  "KorhrdGroup/baroemp",
+  "Wakeupjin/janghaltalk-demo",
+  "cozyai1997/CRM-PJT",
+  "cozyai1997/SMS_AI_PJT",
+  "dalgme/castlog",
+  "genre0928/festival-hub",
+  "hsk9867-ai/gym-ai-assistant",
+  "hun930323-max/gym-portal",
+  "joyzh1029/RISE_LOCAL",
+  "jswlovers/SmallERP",
+  "kimyusoo/landlanguage-edm",
+  "kosa-second-project/message-demo",
+  "law-n-road/law-n-road",
+  "leecg39/CMR",
+  "lskdc001-cyber/CA_Benz",
+  "papas-yohan/moodon",
+  "posmos2023-a11y/CHEVROLETcode",
+  "rinrin818/AI-Sales-Agent",
+  "rufnek737/crewswap",
+  "seodam1122/asiadbowl",
+  "settlegate/Amway",
+  "space-cap/final-team3-fe-v2",
+  "teiler202-cmd/v4v-store",
+  "wellnessmode/Nationalgym-Renew",
+  "wonik-choi/backoffice",
+  "xo733169-alt/perpackage-marketing-leads"
+ ]
+}

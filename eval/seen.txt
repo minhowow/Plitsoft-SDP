@@ -1,0 +1,55 @@
+# 이미 본 저장소. 후보에서 뺀다. 한 줄에 owner/name, # 뒤는 까닭
+airman5573/algorithm-toolkit-in-javascript  # 9/30 평가 dev
+amber-hk/CRM_clobe  # 10/6 광고 후보 개발용
+ASC-OVP/ASC_student_manage_260710  # 10/6 광고 후보 개발용
+billyssam/marketing-allinone  # 10/6 광고 후보 개발용
+bonjin-app/brick  # 10/6 광고 후보 개발용
+boostcampwm-2021/bookathon_B  # 9/30 평가 test
+boostcampwm-2021/WEB23-HyupUp  # 9/30 평가 dev
+boostcampwm-2024/web05-Denamu  # 10/6 조사에서 열어 봄
+boostcampwm-2024/web28-DDara  # 9/30 평가 dev
+boostcampwm-2024/web30-stop-troublepainter  # 9/30 평가 test
+boostcampwm2025/web30-TADAK  # 9/30 평가 test
+BSSM-BSM/BSM-Frontend-V2  # 9/30 평가 dev
+ckm960411/Modrak  # 9/30 평가 dev
+codestates-seb/seb39_main_013  # 9/30 평가 test
+coffee-meet/frontend  # 9/30 평가 dev
+createrx123/knotive-os  # 10/6 광고 후보 개발용
+gksrudehd123-maker/OMS  # 10/6 광고 후보 개발용
+guhakim/jarada  # 10/6 광고 후보 개발용
+hyokualexkwon/markdown-react  # 9/30 평가 dev
+hyunbinseo/holidays-kr  # 9/30 평가 test
+j-yesung/magic-pos  # 9/30 평가 test
+jen-frontend/fastcampus-react-twitter  # 9/30 평가 test
+JinInSaDaeCheonMyeong/starthub-app  # 9/30 평가 dev
+johunsang/vive-md  # 9/30 평가 dev
+jswlovers/ForestClub  # 10/6 광고 후보 개발용
+kakao-tech-campus-2nd-step3/Team3_FE  # 9/30 평가 dev
+kisagge/shopApp  # 10/6 광고 후보 개발용
+KUSITMS-MOAMOA/MOAMOA_FE  # 9/30 평가 test
+likelion-project-README/README  # 9/30 평가 dev
+linkonai2026-kr/design-on  # 9/30 평가 dev
+Linkshimcat/Glocalizer  # 9/30 평가 test
+Malbolo/Excelerate  # 9/30 평가 dev
+mash-up-kr/VitaminC_Web  # 9/30 평가 dev
+MetLife-Hackathon/MetLife-Hackathon  # 9/30 평가 test
+milooy/remote-or-flexible-work-company-in-korea  # 9/30 평가 dev
+minjipi/little_vanilla_front  # 9/30 평가 dev
+Neogasogaeseo/Naega-Web  # 9/30 평가 dev
+newhajinyoon/github-korean  # 9/30 평가 test
+obundh/gonggong-ax-local-3  # 9/30 평가 test
+oeeen/commerce  # 9/30 평가 test
+pill-my-rhythm/pill-my-rhythm  # 9/30 평가 test
+pocket03/BAECHURI-3-Sec-Waste-Guide  # 10/6 광고 후보 개발용
+preonboarding-internship/selection-task  # 9/30 평가 test
+project-elmo/project_elmo_frontend  # 9/30 평가 dev
+pyobonboy/car-service-queue  # 10/6 광고 후보 개발용
+PyTorchKR/terms-kr  # 9/30 평가 test
+rimo030/nestjs-e-commerce-frame  # 9/30 평가 test
+sodam-ai/SoDam-Persona-Codex  # 9/30 평가 dev
+SWM-FIRE/modoco-frontend  # 9/30 평가 dev
+team-medeasy/medeasy-frontend  # 9/30 평가 test
+TeamSparker/Spark-Server  # 9/30 평가 test
+Vactor0911/jobtalk  # 9/30 평가 test
+woochan94/REACT_ChanStyle  # 9/30 평가 test
+yesfordev/homedong  # 9/30 평가 dev
