@@ -39,6 +39,9 @@ UNTESTED_WHY = {
 }
 
 
+AGENT_VERDICT = {"compliant": "충족", "not-compliant": "미충족", "not-applicable": "해당 없음", "unknown": "모름"}
+
+
 class Style:
     def __init__(self, enabled: bool) -> None:
         self.on = enabled
@@ -89,6 +92,7 @@ def render(result: EvalResult, root: Path | None = None, explain: bool = False, 
 
     if explain:
         out.extend(_ai_decisions(result, st, root))
+        out.extend(_agent_cleared(result, st))
 
     out.append("")
     out.append(_summary(result, findings, st, root))
@@ -129,6 +133,13 @@ def _body(f: Finding, st: Style) -> list[str]:
 
     if f.ask_developer and not any(a.get("ask_developer") for a in f.alternatives):
         lines.append(st.dim(f"    확인 질문  {f.ask_developer}"))
+    if f.agent:
+        verdict = AGENT_VERDICT.get(f.agent.get("verdict", ""), f.agent.get("verdict", ""))
+        reason = f" — {f.agent['reason']}" if f.agent.get("reason") else ""
+        lines.append(st.soft(f"    에이전트  {verdict}{reason}"))
+        for c in f.agent.get("citations", [])[:3]:
+            mark = "" if c.get("ok") else f" (관문 거절: {c.get('why')})"
+            lines.append(st.dim(f"      {c.get('file')}:{c.get('line')} “{str(c.get('text', ''))[:100]}”{mark}"))
     return lines
 
 
@@ -160,6 +171,41 @@ def _ai_decisions(result: EvalResult, st: Style, root: Path | None) -> list[str]
             where = rel(d["file"], root) + (f":{d['line']}" if d.get("line") else "")
             out.append(f"  {where}  {d['policy']}/{d['rule']}")
             out.append(st.dim(f"    질문: {d['question']} → {d['answer']}"))
+    return out
+
+
+def _agent_cleared(result: EvalResult, st: Style) -> list[str]:
+    """에이전트가 푼 경고. 인용이 관문을 통과했어도 그 줄이 의무를 이행하는지는 사람이 봐야 한다."""
+    cleared = [r for r in (result.agent or {}).get("records", []) if r.get("action") == "cleared"]
+    if not cleared:
+        return []
+    out = ["", st.bold("에이전트가 해제한 경고") + st.dim("  인용한 줄이 의무를 이행하는지 확인하세요")]
+    for r in cleared:
+        verdict = AGENT_VERDICT.get(r["verdict"], r["verdict"])
+        out.append(f"  {r['entry']}  {r['policy']}  → {verdict}" + (f" — {r['reason']}" if r.get("reason") else ""))
+        for c in r["citations"]:
+            if c.get("ok"):
+                out.append(st.dim(f"    {c['file']}:{c.get('line')} “{str(c.get('text', ''))[:100]}”"))
+    return out
+
+
+def _agent_note(agent: dict) -> list[str]:
+    acts = agent.get("actions", {})
+    asked = agent.get("asked", sum(acts.values()))
+    usage = agent.get("usage", {})
+    tokens = sum(usage.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    head = (
+        f"  에이전트 검토({agent.get('mode', 'review')}) {agent.get('judge', '')} — "
+        + (f"단위 {asked}개: " if agent.get("mode") != "independent" else "")
+        + ", ".join(f"{k} {v}" for k, v in sorted(acts.items()))
+        + f" · 모델 호출 {agent.get('model_calls', 0)}회 · 입력 토큰 {tokens:,}"
+        + f" · 출력 토큰 {usage.get('output_tokens', 0):,}"
+    )
+    out = [head]
+    if agent.get("citations"):
+        out.append(f"  인용 {agent['citations']}개 가운데 관문이 거절한 것 {agent.get('citations_rejected', 0)}개")
+    if acts.get("cleared"):
+        out.append(f"  에이전트가 해제한 경고 {acts['cleared']}단위 — 인용한 줄을 확인하세요(--explain 또는 full 출력)")
     return out
 
 
@@ -202,6 +248,8 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path 
         )
     if result.ai_dismissed:
         gaps.append(f"  AI 가 '해당 없음'으로 뺀 판정 {len(result.ai_dismissed)}건 — 인용 없이 빠졌습니다")
+    if result.agent:
+        gaps.extend(_agent_note(result.agent))
     if result.unparsed:
         names = ", ".join(rel(p, root) for p in result.unparsed[:3])
         more = f" 외 {len(result.unparsed) - 3}개" if len(result.unparsed) > 3 else ""

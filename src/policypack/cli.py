@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="정적 경고를 후보 단위로 묶어 에이전트형 판정기가 관련 파일을 읽고 다시 본다(인용 관문을 거친다). "
         "코드가 외부 API 로 나간다. ANTHROPIC_API_KEY 가 필요하다",
     )
+    sc.add_argument(
+        "--agent-mode",
+        default="review",
+        choices=["review", "independent"],
+        help="review(기본): 정적 경고를 다시 본다. independent: 정적 검사 없이 정책마다 에이전트가 스스로 찾는다",
+    )
     sc.add_argument("--agent-max-units", type=int, default=None, metavar="N", help="에이전트에게 물을 후보 단위 상한")
     sc.add_argument("--agent-budget", type=int, default=20, metavar="N", help="단위당 에이전트 도구 호출 상한(기본 20)")
     sc.add_argument("--output-format", default="full", choices=["full", "concise", "json", "sarif"])
@@ -534,7 +540,8 @@ def cmd_scan(args) -> int:
             raise ConfigError(str(e)) from e
         if found.files:
             print(
-                f"에이전트 검토({args.agent}): 경고가 난 파일과 관련 파일의 코드가 Anthropic API 로 나갑니다. "
+                f"에이전트 검토({args.agent}, {args.agent_mode}): 에이전트가 읽은 파일의 코드가 Anthropic API 로 "
+                f"나갑니다(비밀값은 가리고 .env 등은 읽지 않음). "
                 f"단위당 도구 호출 {args.agent_budget}번까지"
                 + (f", 단위 {args.agent_max_units}개까지" if args.agent_max_units is not None else ""),
                 file=sys.stderr,
@@ -550,6 +557,18 @@ def cmd_scan(args) -> int:
             )
             _emit(args, empty, pack, base, root, digest, n_files=0)
         return _exit_code(args, [], found)
+
+    if agent is not None and args.agent_mode == "independent":
+        # 정적 검사 없이 에이전트만 본다(평가의 M3). 정적 판정이 섞이지 않게 엔진을 돌리지 않는다
+        from policypack.evaluate.agent_pass import run_independent
+        from policypack.pack.loader import load_duties
+
+        result = EvalResult(judge_id="", skipped=[str(p) for p in found.skipped_files()])
+        result.findings, result.agent = run_independent(
+            _agent_root(list(found.files), root), pack, load_duties(base), agent
+        )
+        _emit(args, result, pack, base, root, digest, n_files=len(found))
+        return _exit_code(args, result.findings, found)
 
     targets = [Target(path=f, lang=language_of(f)) for f in found.files]
     static = SemgrepBackend().run(compile_static(pack), [t.path for t in targets])

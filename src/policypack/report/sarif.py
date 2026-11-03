@@ -159,6 +159,8 @@ def build(
                             "aiDismissed": [{**d, "file": _uri(d["file"], root)} for d in result.ai_dismissed],
                             "packDigest": pack_digest,
                             "coverageComplete": result.coverage_complete,
+                            # 에이전트 검토(--agent)를 돌렸을 때만. 푼 단위는 결과로 내지 않고 여기 인용과 함께 둔다
+                            **({"agent": _agent_summary(result.agent)} if result.agent is not None else {}),
                         },
                     }
                 ],
@@ -256,6 +258,7 @@ def _result(f: Finding, rule_index: int, root: Path | None, fp: str) -> dict:
             "decisionPath": f.trace,
             "unsatisfiedAlternatives": f.alternatives,
             "scope": f.scope,
+            **({"agent": f.agent} if f.agent is not None else {}),
         },
     }
     related = [
@@ -266,9 +269,29 @@ def _result(f: Finding, rule_index: int, root: Path | None, fp: str) -> dict:
         }
         for i, line in enumerate(f.anchor_lines[1:], start=1)
     ]
+    for c in (f.agent or {}).get("citations", []):
+        if c.get("ok") and isinstance(c.get("line"), int):
+            related.append(
+                {
+                    "id": len(related) + 1,
+                    "physicalLocation": {"artifactLocation": {"uri": c["file"]}, "region": {"startLine": c["line"]}},
+                    "message": {"text": "에이전트가 인용한 줄"},
+                }
+            )
     if related:
         out["relatedLocations"] = related
     return out
+
+
+def _agent_summary(agent: dict) -> dict:
+    """SARIF 에 싣는 에이전트 기록. 대화 기록(questions)의 전송 목록은 JSON 보고서에만 둔다."""
+    keep = ("judge", "mode", "units", "asked", "actions", "model_calls", "usage", "citations", "citations_rejected")
+    cleared = [
+        {k: r.get(k) for k in ("policy", "entry", "verdict", "reason", "citations")}
+        for r in agent.get("records", [])
+        if r.get("action") == "cleared"
+    ]
+    return {**{k: agent[k] for k in keep if k in agent}, "cleared": cleared}
 
 
 def dumps(*args, **kwargs) -> str:
