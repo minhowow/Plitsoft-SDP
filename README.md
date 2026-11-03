@@ -289,8 +289,9 @@ Opengrep(Semgrep CE 의 LGPL-2.1 포크)으로 갈아탈 수도 있다. 라이�
 | `policies/kr-core/` | 내장 정책 팩, 조문 원문(`_legal/`), 픽스처(`tests/`) |
 | `schemas/` | 정책 팩·테스트 파일의 JSON Schema (`policypack schema --write` 가 만든다) |
 | `tests/` | pytest |
+| `docs/` | 방향, 구조, 일정, 평가 설계, 결정 기록, 국내 법 의무 지도, 보고서 위치 ([docs/README.md](docs/README.md)) |
 
-측정·연구 기록과 보고서는 태그 `archive/research-2026-09-29` 에 남아 있다.
+9/29 이전의 측정·연구 기록은 태그 `archive/research-2026-09-29` 에 남아 있다.
 
 ## 자주 묻는 것
 
