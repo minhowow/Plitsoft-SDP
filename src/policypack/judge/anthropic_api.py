@@ -16,7 +16,7 @@ import os
 from policypack.judge.base import SYSTEM, Answer, Failure, OncePerRun, Question, parse_answer
 from policypack.judge.http import Transport, http_transport
 
-#: 별칭 → 모델 id. 평가처럼 다시 돌려야 하는 실행에는 전체 id 를 쓴다.
+#: 별칭 → 모델 id. 결과를 다시 만들어야 하는 실행에는 전체 id 를 쓴다.
 MODELS = {
     "haiku": "claude-haiku-5-5",
     "sonnet": "claude-sonnet-5-5",

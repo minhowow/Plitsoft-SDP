@@ -10,4 +10,5 @@
 | SOFTCON 포스터·영상 | 11월 예정 | | |
 
 양식: `~/Documents/Ajou/자주프/자기주도프로젝트 중간보고서,결과보고서 양식.docx` (결과 보고서는 Version 2.0 으로 적는다).
-보고서의 수치는 [../evaluation.md](../evaluation.md) 와 같은 원자료에서 가져온다.
+결과 보고서에 싣는 수치는 정답 없이 도구 출력에서 세는 것이다([../decisions/0004](../decisions/0004-no-accuracy-experiment.md)).
+원자료는 `~/.cache/policypack-eval/` 아래 날짜별 폴더에 둔다.

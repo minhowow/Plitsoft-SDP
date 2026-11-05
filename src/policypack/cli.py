@@ -572,7 +572,7 @@ def cmd_scan(args) -> int:
         return _exit_code(args, [], found)
 
     if agent is not None and args.agent_mode == "independent":
-        # 정적 검사 없이 에이전트만 본다(평가의 M3). 정적 판정이 섞이지 않게 엔진을 돌리지 않는다
+        # 정적 검사 없이 에이전트만 본다. 정적 판정이 섞이지 않게 엔진을 돌리지 않는다
         from policypack.evaluate.agent_pass import run_independent
         from policypack.pack.loader import load_duties
 
