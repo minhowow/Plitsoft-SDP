@@ -517,4 +517,8 @@ def build(spec: str, budget: int = 20, env: dict | None = None) -> AgentJudge:
     key = (env if env is not None else os.environ).get("ANTHROPIC_API_KEY")
     if not key:
         raise ValueError("ANTHROPIC_API_KEY 가 없습니다")
-    return AgentJudge(model, http_transport(key), budget=budget)
+    from policypack.judge.anthropic_api import MODELS
+
+    # 별칭(haiku·sonnet·opus)을 풀어 부른다. 풀지 않으면 API 가 모델을 모른다고 답해 질문이 모두
+    # 실패했다(웹 쪽 검토, R7)
+    return AgentJudge(MODELS.get(model, model), http_transport(key), budget=budget)

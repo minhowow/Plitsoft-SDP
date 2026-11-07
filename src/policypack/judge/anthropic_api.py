@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 
 from policypack.judge.base import SYSTEM, Answer, Failure, OncePerRun, Question, parse_answer
-from policypack.judge.http import Transport, http_transport
+from policypack.judge.http import Transport, Unavailable, http_transport
 
 #: 별칭 → 모델 id. 결과를 다시 만들어야 하는 실행에는 전체 id 를 쓴다.
 MODELS = {
@@ -38,7 +38,8 @@ class AnthropicApiJudge:
         transport: Transport | None = None,
     ) -> None:
         self.model_id = MODELS.get(model, model)
-        self.id = f"anthropic:{model}"
+        # 보고서의 run.judge 에는 별칭이 아니라 실제로 부른 모델 id 를 싣는다(별칭이 가리키는 모델은 바뀔 수 있다)
+        self.id = f"anthropic:{self.model_id}"
         self.system = system
         self.timeout = timeout
         self.max_tokens = max_tokens
@@ -74,6 +75,10 @@ class AnthropicApiJudge:
             try:
                 msg = send(body)
                 break
+            except Unavailable as e:
+                text = str(e)
+                timed_out = "시간 초과" in text or "timed out" in text.lower()
+                return Answer(raw="?", failure="timeout" if timed_out else "transport", unreachable=True)
             except RuntimeError as e:
                 text = str(e)
                 if self._temperature and "temperature" in text:

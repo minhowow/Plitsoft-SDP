@@ -1,7 +1,8 @@
 """Anthropic Messages API 를 표준 라이브러리로 부른다. SDK 를 설치하지 않아도 판정자·에이전트가 돈다.
 
 재시도: 429·5xx·529·연결 실패·연결 끊김은 10초, 20초 … 로 네 번까지 다시 보낸다. 재시도를 다 쓰면 `Unavailable`
-(서비스에 닿지 못함)이다. 그 밖의 HTTP 오류(400 처럼 그 요청만 거절된 것)는 바로 RuntimeError 다.
+(서비스에 닿지 못함)이다. 401·403·404(키·권한·모델)도 다시 보내지 않고 `Unavailable` 이다. 그 밖의 HTTP 오류(400 처럼
+그 요청만 거절된 것)는 바로 RuntimeError 다.
 목적지: SDK 처럼 `ANTHROPIC_BASE_URL` 이 있으면 그리로 보낸다(사내 게이트웨이). scan 의 알림이 그 목적지를 적는다.
 """
 
@@ -17,6 +18,9 @@ from collections.abc import Callable
 
 DEFAULT_BASE = "https://api.anthropic.com"
 RETRY = (429, 500, 502, 503, 529)
+DEAD = (401, 403, 404)
+"""다시 보내도 같은 답이 오는 오류: 키가 틀렸거나(401) 권한이 없거나(403) 모델이 없다(404).
+이 실행의 다른 질문도 같다."""
 
 
 class Unavailable(RuntimeError):
@@ -52,7 +56,7 @@ def http_transport(key: str, timeout: float = 300.0, url: str | None = None, sle
                 if e.code in RETRY and attempt < 4:
                     sleep(10 * (attempt + 1))
                     continue
-                kind = Unavailable if e.code in RETRY else RuntimeError
+                kind = Unavailable if e.code in RETRY or e.code in DEAD else RuntimeError
                 raise kind(f"HTTP {e.code}: {detail[:300]}") from None
             except TimeoutError:
                 # 응답이 오지 않는 요청은 한 번만 다시 보낸다. 다섯 번 기다리면 질문 하나에 25분이 간다

@@ -383,6 +383,34 @@ def test_request_rejections_do_not_switch_the_judge_off():
     assert inner.calls == 10 and judge.skipped == 0
 
 
+def test_an_unreachable_api_judge_is_given_up_on_and_reports_its_real_model():
+    """시간 초과가 '연결 실패: 시간 초과' 로 와서 timeout 으로 세지 않았고, 연결 실패는 아예 세지 않아
+    판정자 그만 묻기가
+    돌지 않았다(웹 쪽 검토 R24). 서비스에 닿지 못한 답은 세고, 그 질문만 거절된 답은 세지 않는다.
+    run.judge 에는 별칭이 아니라 실제 모델 id 가 실린다(R7)."""
+    from policypack.judge.anthropic_api import AnthropicApiJudge
+    from policypack.judge.base import OncePerRun
+    from policypack.judge.http import Unavailable
+
+    calls = []
+
+    def down(body):
+        calls.append(body["model"])
+        raise Unavailable("연결 실패: 시간 초과(120초 × 2)")
+
+    judge = OncePerRun(AnthropicApiJudge("haiku", transport=down))
+    answers = [judge.ask(q) for q in _questions(5)]
+    assert judge.id == "anthropic:claude-haiku-5-5" and calls == ["claude-haiku-5-5"] * OncePerRun.GIVE_UP_AFTER
+    assert [a.failure for a in answers[:3]] == ["timeout"] * 3 and judge.skipped == 2
+
+    def refused(body):
+        calls.append(1)
+        raise RuntimeError("HTTP 400: prompt is too long")
+
+    judge = OncePerRun(AnthropicApiJudge("haiku", transport=refused))
+    assert {judge.ask(q).failure for q in _questions(5)} == {"transport"} and judge.skipped == 0
+
+
 # ── 프롬프트 · 알림 ─────────────────────────────────────────────────────────
 
 
@@ -515,10 +543,10 @@ def test_http_transport_gives_up_after_two_timeouts(monkeypatch):
     assert len(calls) == 2
 
 
-@pytest.mark.parametrize(("code", "down"), [(400, False), (401, False), (500, True), (529, True)])
+@pytest.mark.parametrize(("code", "down"), [(400, False), (401, True), (404, True), (500, True), (529, True)])
 def test_http_transport_tells_a_refused_request_from_an_unreachable_service(monkeypatch, code, down):
-    """재시도를 다 쓴 429·5xx 는 서비스에 닿지 못한 것(Unavailable)이고, 400 처럼 그 요청만 거절된 것은 아니다.
-    에이전트는 Unavailable 만 세어 남은 질문을 그만 보낸다."""
+    """재시도를 다 쓴 429·5xx 와 다시 보내도 같은 401·403·404(키·권한·모델)는 서비스에 닿지 못한 것(Unavailable)이고,
+    400 처럼 그 요청만 거절된 것은 아니다. 판정자와 에이전트는 Unavailable 만 세어 남은 질문을 그만 보낸다."""
     import io
     import urllib.error
     import urllib.request

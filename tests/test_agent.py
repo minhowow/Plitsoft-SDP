@@ -232,6 +232,8 @@ def test_build_needs_key():
     with pytest.raises(ValueError, match="알 수 없습니다"):
         build("openai:m", env={"ANTHROPIC_API_KEY": "k"})
     assert build("anthropic:claude-x", env={"ANTHROPIC_API_KEY": "k"}).id == "agent:anthropic:claude-x"
+    # 별칭을 풀어 부른다. 풀지 않으면 API 가 모델을 몰라 질문이 모두 실패했다(R7)
+    assert build("anthropic:haiku", env={"ANTHROPIC_API_KEY": "k"}).model == "claude-haiku-5-5"
 
 
 def test_gate_multi_file(repo):
