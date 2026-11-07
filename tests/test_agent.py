@@ -359,7 +359,7 @@ def test_independent_makes_findings_from_agent_answers(repo):
         "dropped-out-of-scope": 1,
         "dropped-ungrounded": 2,  # 인용 없음 · 다른 파일의 줄만 인용
     }
-    assert rec["model_calls"] == 5 and rec["usage"]["input_tokens"] == 50
+    assert rec["model_calls"] == len(order) and rec["usage"]["input_tokens"] == 10 * len(order)  # 정책마다 질문 하나
 
 
 def test_discovery_skips_what_static_already_saw(repo):
@@ -432,6 +432,7 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
         answer(),
         answer(("chat.ts", "미충족", chat, 1)),
         answer(),
+        answer(),
         answer(("chat.ts", "미충족", [])),  # 찾은 곳을 review 처럼 다시 묻는다
     )
     monkeypatch.setattr(agent_mod, "build", fake(send))
@@ -442,7 +443,7 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
     assert agent["discover"]["actions"] == {"dropped-known": 1, "warned": 1}
     assert agent["recheck"]["actions"] == {"confirmed": 1}
     calls = agent["model_calls"] + agent["discover"]["model_calls"] + agent["recheck"]["model_calls"]
-    assert agent["total_model_calls"] == calls == 7
+    assert agent["total_model_calls"] == calls == 8
     assert [(Path(f["file"]).name, f["policy"]) for f in doc["findings"] if f["rule"] == "agent-discovered"] == [
         ("chat.ts", "kr.ai-basic-act.31-1")
     ]

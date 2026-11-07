@@ -51,7 +51,7 @@
 | 정적 결과 보존, AI 결과와 나란히 보고 | `report/` | 끝(8cd5048). JSON·글·SARIF |
 | 독립 검토, 결합 방식, 찾은 곳 재확인 | `cli.py`, `evaluate/agent_pass.py` | 끝(8824f27, 42dd4c1) |
 | 외부 전송 통제 | `egress.py` | 끝(8cd5048). 전화·이메일은 이행 근거라 가리지 않음 |
-| PII→외부 AI 정책(개인정보 보호법 제28조의8·제26조) | `policies/kr-core/` | 11주 |
+| PII→외부 AI 정책(개인정보 보호법 제28조의8·제26조) | `policies/kr-core/` | 끝(11/7). `kr.pipa.28-8`, 픽스처 33개 |
 | AI 실패 시 정적 결과 유지 시험 | `tests/` | 12주 |
 | 운영 지표 뽑기(관문 거절률, 가린 수, 비용) | 스크립트 | 12주 |
 | Claude Code 훅, GitLab Code Quality 출력 | `integrations/`, `report/` | 13주 |
