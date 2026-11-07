@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from policypack.evidence import classify, is_grounded
+from policypack.evidence import classify, is_grounded, locate, strip_comments
 from policypack.index import build_index
 from policypack.index.units import candidate_units
 from policypack.judge.agent import AgentAnswer, AgentJudge, AgentQuestion, Entry
@@ -56,6 +56,11 @@ def gate(root: Path, citations: list[dict]) -> list[dict]:
             code = p.read_text(encoding="utf-8", errors="replace")
             rec["ok"] = is_grounded(text, code)
             rec["why"] = "grounded" if rec["ok"] else classify(text, code).value
+            if rec["ok"]:
+                # 줄 번호는 모델이 적은 값이다. 인용이 실제로 시작하는 줄로 맞추고, 다르면 모델의 값을 함께 남긴다
+                at = locate(text, code) or locate(strip_comments(text), strip_comments(code))
+                if at and rec["line"] not in at:
+                    rec["line_model"], rec["line"] = rec["line"], at[0]
         out.append(rec)
     return out
 
@@ -290,7 +295,13 @@ def run_independent(
                 "citations": checked,
                 "question": qn,
             }
-            records.append({"policy": pol.id, "entry": entry, "line": res.line, **note})
+            # 경고의 줄도 모델이 적은 값이다. 진입 파일에서 관문을 통과한 인용의 줄 가운데 하나여야 하고, 아니면 그
+            # 첫 인용의 줄로 맞춘다
+            own_lines = [c["line"] for c in checked if c["ok"] and c["file"].removeprefix("./").lstrip("/") == entry]
+            line = res.line
+            if own_lines and line not in own_lines:
+                note["line_model"], line = line, own_lines[0]
+            records.append({"policy": pol.id, "entry": entry, "line": line, **note})
             if action.startswith("warned"):
                 findings.append(
                     Finding(
@@ -302,7 +313,7 @@ def run_independent(
                         title=pol.title,
                         law=_law_of(pol),
                         ask_developer=pol.ask_developer or "",
-                        line=res.line,
+                        line=line,
                         trace=[f"agent({rule}): {res.verdict}"],
                         agent=note,
                     )

@@ -144,3 +144,37 @@ def is_grounded(evidence: str, code: str, strict: bool = False, stripped: str | 
         return False  # 인용에서 주석을 떼면 남는 게 없다 = 주석만 인용했다
     bare_code = stripped if stripped is not None else strip_comments(code)
     return classify(bare_evidence, bare_code, stripped=bare_code) is GateResult.GROUNDED
+
+
+def locate(evidence: str, code: str) -> list[int]:
+    """인용이 코드에서 시작하는 줄 번호(1부터) 목록. 비교는 classify 와 같은 꼴(공백을 한 칸으로)로 한다.
+
+    모델이 적은 줄 번호는 모델의 말일 뿐이다. 웹은 인용 줄로 GitHub 링크를 만들고 보고서는 그 줄을 가리키므로,
+    관문을 통과한 인용의 줄은 여기서 다시 구한다(웹 쪽 검토 R25).
+    """
+    ev = _norm(evidence)
+    if not ev:
+        return []
+    chars: list[str] = []
+    lines: list[int] = []
+    line, space = 1, False
+    for ch in code:
+        if ch.isspace():
+            space = bool(chars)
+        else:
+            if space:
+                chars.append(" ")
+                lines.append(line)
+                space = False
+            chars.append(ch)
+            lines.append(line)
+        if ch == "\n":
+            line += 1
+    flat = "".join(chars)
+    found, i = [], flat.find(ev)
+    while i >= 0:
+        start = lines[i + 1] if flat[i] == " " and i + 1 < len(lines) else lines[i]
+        if start not in found:
+            found.append(start)
+        i = flat.find(ev, i + 1)
+    return found

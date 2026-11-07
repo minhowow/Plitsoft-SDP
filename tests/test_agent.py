@@ -236,6 +236,26 @@ def test_build_needs_key():
     assert build("anthropic:haiku", env={"ANTHROPIC_API_KEY": "k"}).model == "claude-haiku-5-5"
 
 
+def test_gate_puts_the_citation_on_the_line_where_it_is(repo):
+    """줄 번호는 모델이 적은 값이다. 웹은 그 줄로 링크를 만든다(R25). 관문을 통과한 인용은 실제 줄로 맞추고, 다르면
+    모델의 값을 line_model 에 남긴다. 맞으면 그대로 둔다. 통과하지 못한 인용은 손대지 않는다."""
+    [wrong, right, multi, none, made_up] = gate(
+        repo,
+        [
+            {"file": "src/components/AgeGate.tsx", "line": 1, "text": "if (age < 14) throw new Error"},
+            {"file": "src/components/AgeGate.tsx", "line": 3, "text": "if (age < 14) throw new Error"},
+            {"file": "src/pages/Signup.tsx", "line": 9, "text": "export default function Signup() { return (<form>"},
+            {"file": "src/components/AgeGate.tsx", "text": "if (age < 14) throw new Error"},
+            {"file": "src/components/AgeGate.tsx", "line": 7, "text": "if (age < 19) throw"},
+        ],
+    )
+    assert (wrong["line"], wrong["line_model"]) == (3, 1)
+    assert right["line"] == 3 and "line_model" not in right
+    assert (multi["line"], multi["line_model"]) == (2, 9)  # 두 줄에 걸친 인용은 시작 줄
+    assert (none["line"], none["line_model"]) == (3, None)
+    assert not made_up["ok"] and made_up["line"] == 7 and "line_model" not in made_up
+
+
 def test_gate_multi_file(repo):
     res = gate(
         repo,
@@ -389,6 +409,8 @@ def test_independent_makes_findings_from_agent_answers(repo):
     assert [(f.policy, f.rule, f.outcome, f.line) for f in findings] == [
         (order[3], "agent-independent", Outcome.NEEDS_REVIEW, 3)
     ]
+    # 모델이 적은 줄(3)이 인용이 실제로 있는 줄과 같아서 그대로다
+    assert all("line_model" not in f.agent for f in findings)
     assert rec["actions"] == {
         "warned": 1,
         "dropped-no-file": 1,
@@ -397,6 +419,16 @@ def test_independent_makes_findings_from_agent_answers(repo):
         "dropped-ungrounded": 2,  # 인용 없음 · 다른 파일의 줄만 인용
     }
     assert rec["model_calls"] == len(order) and rec["usage"]["input_tokens"] == 10 * len(order)  # 정책마다 질문 하나
+
+
+def test_a_warning_lands_on_the_cited_line_not_the_claimed_one(repo):
+    """독립 검토가 낸 경고의 줄도 모델이 적은 값이다. 진입 파일에서 통과한 인용의 줄이 아니면 그 줄로 맞춘다(R25)."""
+    pack, duties = load_pack(KR_CORE), load_duties(KR_CORE)
+    send = scripted(answer(("src/pages/Signup.tsx", "미충족", [{**SIGNUP_LINE, "line": 1}], 40)))
+    findings, rec = run_independent(repo, pack, duties, AgentJudge("m", send), sorted(repo.rglob("*.tsx")))
+    [f] = findings
+    assert f.line == SIGNUP_LINE["line"] and f.agent["line_model"] == 40
+    assert f.agent["citations"][0]["line_model"] == 1
 
 
 def test_discovery_skips_what_static_already_saw(repo):
