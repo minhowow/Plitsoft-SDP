@@ -323,6 +323,9 @@ Opengrep(Semgrep CE 의 LGPL-2.1 포크)으로 갈아탈 수도 있다. 라이�
     자기 답에 대개 동의해서, 재확인은 다른 모델로 하는 편이 낫다(`--agent-recheck anthropic:claude-sonnet-5-5`).
   - `independent`: 정적 검사 없이 정책마다 에이전트가 스스로 찾는다.
 - 비용(dev 저장소 20곳, 보수 단가): 저장소당 review 약 $0.02, combined + sonnet 재확인 약 $0.2.
+- 서비스에 닿지 못하면(네트워크 끊김, 429·5xx 재시도를 다 씀) 질문 두 개가 연달아 실패한 뒤 남은 질문은 보내지 않는다.
+  정적 판정은 그대로 남고, 보내지 않은 질문 수를 stderr 와 JSON(`run.agent.questions_skipped`, 단계마다 `unanswered`)에
+  남긴다. 독립 검토는 정적 판정이 없으므로, 답을 받지 못한 정책이 있으면 경고가 없어도 종료 코드를 '불확실'처럼 1로 센다.
 - `--agent-max-units`, `--agent-budget`(단위당 도구 호출, 기본 20)으로 비용을 묶는다. 호출 수와 토큰은 요약과
   JSON(`run.agent`)에 나온다. `--agent` 를 주지 않으면 이 단계는 돌지 않고 보고서도 그대로다.
 

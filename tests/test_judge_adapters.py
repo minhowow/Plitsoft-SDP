@@ -18,6 +18,7 @@ from policypack.cli import main
 from policypack.judge import claude_cli
 from policypack.judge.base import SYSTEM, Question, json_only, parse_answer
 from policypack.judge.claude_cli import ISOLATION_FLAGS, ISOLATION_SHA, ClaudeCliJudge, build_command
+from policypack.judge.http import Unavailable
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -493,7 +494,7 @@ def test_http_transport_retries_dropped_connections(monkeypatch):
         raise ConnectionResetError(54, "reset")
 
     monkeypatch.setattr(urllib.request, "urlopen", always)
-    with pytest.raises(RuntimeError, match="연결 실패"):
+    with pytest.raises(Unavailable, match="연결 실패"):
         http_transport("k", url="https://x", sleep=lambda s: None)({})
 
 
@@ -509,6 +510,25 @@ def test_http_transport_gives_up_after_two_timeouts(monkeypatch):
         raise TimeoutError("timed out")
 
     monkeypatch.setattr(urllib.request, "urlopen", hang)
-    with pytest.raises(RuntimeError, match="시간 초과"):
+    with pytest.raises(Unavailable, match="시간 초과"):
         http_transport("k", url="https://x", timeout=1, sleep=lambda s: None)({})
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize(("code", "down"), [(400, False), (401, False), (500, True), (529, True)])
+def test_http_transport_tells_a_refused_request_from_an_unreachable_service(monkeypatch, code, down):
+    """재시도를 다 쓴 429·5xx 는 서비스에 닿지 못한 것(Unavailable)이고, 400 처럼 그 요청만 거절된 것은 아니다.
+    에이전트는 Unavailable 만 세어 남은 질문을 그만 보낸다."""
+    import io
+    import urllib.error
+    import urllib.request
+
+    from policypack.judge.http import http_transport
+
+    def refuse(req, timeout):
+        raise urllib.error.HTTPError("https://x", code, "x", {}, io.BytesIO(b"no"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    with pytest.raises(RuntimeError, match=f"HTTP {code}") as e:
+        http_transport("k", url="https://x", sleep=lambda s: None)({})
+    assert isinstance(e.value, Unavailable) is down

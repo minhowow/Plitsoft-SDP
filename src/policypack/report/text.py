@@ -206,6 +206,12 @@ def _agent_note(agent: dict) -> list[str]:
         if agent.get(stage):
             acts2 = agent[stage].get("actions", {})
             out.append(f"  {name}: " + (", ".join(f"{k} {v}" for k, v in sorted(acts2.items())) or "없음"))
+    unanswered = sum(a.get("unanswered", 0) for a in (agent, agent.get("discover") or {}, agent.get("recheck") or {}))
+    if unanswered:
+        out.append(
+            f"  답을 받지 못한 질문 {unanswered}개 — 그 단위는 정적 판정 그대로이고, "
+            "찾기·독립 검토라면 그 정책은 보지 못했습니다"
+        )
     if agent.get("citations"):
         out.append(f"  인용 {agent['citations']}개 가운데 관문이 거절한 것 {agent.get('citations_rejected', 0)}개")
     if acts.get("cleared"):

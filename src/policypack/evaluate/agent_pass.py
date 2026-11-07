@@ -92,6 +92,9 @@ def _summary(judge: AgentJudge, records: list[dict], questions: list[dict], extr
         "usage": usage,
         "citations": len(cites),
         "citations_rejected": sum(1 for c in cites if not c["ok"]),
+        # 답을 받지 못한 질문(전송 실패·보내지 않음·읽을 수 없는 답). 그 단위는 정적 판정이 그대로 남고, 독립 검토에서는
+        # 그 정책을 보지 못한 것이다
+        "unanswered": sum(1 for q in questions if q["failure"]),
         "questions": questions,
         "records": records,
     }

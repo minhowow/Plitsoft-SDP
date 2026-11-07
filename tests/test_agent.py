@@ -191,6 +191,41 @@ def test_parse_failure_and_transport_failure(repo):
     }
 
 
+def test_agent_stops_asking_once_the_service_is_unreachable(repo):
+    """연달아 두 질문이 서비스에 닿지 못하면 남은 질문은 보내지 않는다. 그 요청만 거절된 것(400)은 세지 않는다."""
+    from policypack.judge.http import Unavailable
+
+    tries = []
+
+    def down(body):
+        tries.append(1)
+        raise Unavailable("연결 실패: refused")
+
+    judge = AgentJudge("m", down)
+    answers = [judge.ask(Q, repo) for _ in range(4)]
+    assert len(tries) == 2 and judge.skipped == 2
+    assert [a.failure for a in answers[2:]] == ["transport: skipped"] * 2
+
+    def refused(body):
+        tries.append(1)
+        raise RuntimeError("HTTP 400: prompt is too long")
+
+    judge = AgentJudge("m", refused)
+    assert all(judge.ask(Q, repo).failure.startswith("transport: HTTP 400") for _ in range(3)) and judge.skipped == 0
+
+    flaky = iter([Unavailable("x"), None, Unavailable("x"), None])
+
+    def sometimes(body):
+        err = next(flaky)
+        if err:
+            raise err
+        return {"content": answer(), "usage": {}}
+
+    judge = AgentJudge("m", sometimes)
+    [judge.ask(Q, repo) for _ in range(4)]
+    assert judge.skipped == 0  # 사이에 답이 오면 다시 센다
+
+
 def test_build_needs_key():
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         build("anthropic:m", env={})
@@ -447,6 +482,48 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
     assert [(Path(f["file"]).name, f["policy"]) for f in doc["findings"] if f["rule"] == "agent-discovered"] == [
         ("chat.ts", "kr.ai-basic-act.31-1")
     ]
+
+
+@pytest.mark.parametrize("mode", ["review", "combined", "independent"])
+def test_an_unreachable_agent_leaves_the_static_result(tmp_path, monkeypatch, capsys, mode):
+    """네트워크가 끊겨도 정적 판정은 그대로 남고, 보내지 않은 질문을 알린다. 독립 검토는 정적 판정이 없으므로
+    본 것이 없다 — 경고가 없어도 '검토할 것 없음'(0)으로 끝내지 않는다."""
+    import shutil
+
+    import policypack.judge.agent as agent_mod
+    from policypack.cli import main
+    from policypack.judge.http import Unavailable
+
+    target = tmp_path / "app"
+    target.mkdir()
+    shutil.copy(KR_CORE / "tests" / "pipa-22-2" / "violating.ts", target / "signup.ts")
+    shutil.copy(KR_CORE / "tests" / "pipa-28-8" / "openai-profile-summary.ts", target / "summary.ts")
+    shutil.copy(KR_CORE / "tests" / "network-act-50-3" / "violating.ts", target / "ads.ts")
+    base = ["scan", str(target), "--output-format", "json"]
+    plain_code = main(base)
+    plain = json.loads(capsys.readouterr().out)
+    sent = []
+
+    def down(body):
+        sent.append(1)
+        raise Unavailable("연결 실패: refused")
+
+    monkeypatch.setattr(agent_mod, "build", lambda spec, budget=20, env=None: AgentJudge("fake", down, budget=budget))
+    code = main([*base, "--agent", "anthropic:fake", "--agent-mode", mode])
+    out = capsys.readouterr()
+    doc = json.loads(out.out)
+    agent = doc["run"]["agent"]
+    assert len(sent) == AgentJudge.GIVE_UP_AFTER and agent["questions_skipped"] > 0 and "보내지 않았습니다" in out.err
+    if mode == "independent":
+        assert doc["findings"] == [] and agent["unanswered"] == len(agent["questions"]) > 0
+        assert code == 1
+        assert main([*base, "--agent", "anthropic:fake", "--agent-mode", mode, "--fail-on", "review"]) == 0
+        capsys.readouterr()
+    else:
+        key = lambda f: (f["policy"], f["rule"], f["file"], f["line"], f["outcome"])  # noqa: E731
+        assert sorted(map(key, doc["findings"])) == sorted(map(key, plain["findings"])) and code == plain_code == 1
+        assert {f["agent"]["action"] for f in doc["findings"]} == {"kept-no-answer"}
+        assert agent["unanswered"] > 0
 
 
 def test_text_and_sarif_show_agent_results(repo):

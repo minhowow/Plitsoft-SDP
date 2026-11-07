@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 from policypack.egress import is_secret_file, mask
-from policypack.judge.http import Transport, http_transport
+from policypack.judge.http import Transport, Unavailable, http_transport
 
 Verdict = Literal["compliant", "not-compliant", "not-applicable", "unknown"]
 VERDICTS: dict[str, Verdict] = {
@@ -403,9 +403,16 @@ class AgentJudge:
     """`anthropic:<모델 id>` 꼴의 에이전트형 판정기.
 
     `budget` 은 진입 파일 하나짜리 질문의 도구 상한이다. 진입 파일이 늘면 하나마다 BUDGET_PER_ENTRY 씩 늘리되 두 배를
-    넘지 않는다. 독립 검토(independent)는 두 배다."""
+    넘지 않는다. 독립 검토(independent)는 두 배다.
+
+    질문이 연달아 GIVE_UP_AFTER 번 서비스에 닿지 못하면(전송이 재시도를 다 쓴 `Unavailable`) 이 실행에서는 더 보내지
+    않는다. 질문 하나가 재시도로 100초를 쓰므로, 네트워크가 끊긴 채 질문 열 개면 17분이다(11/7 실측: 끝나지 않아 멈춤).
+    400 처럼 그 요청만 거절된 것은 세지 않는다. 보내지 않은 질문은 failure "transport: skipped" 로 답하고
+    `skipped` 에 센다.
+    """
 
     BUDGET_PER_ENTRY = 5
+    GIVE_UP_AFTER = 2
 
     def __init__(self, model: str, transport: Transport, budget: int = 20, max_turns: int = 60) -> None:
         self.model = model
@@ -415,6 +422,8 @@ class AgentJudge:
         self.max_turns = max_turns
         self.calls = 0
         self.usage: dict[str, int] = {}
+        self.skipped = 0
+        self._down = 0
 
     def budget_for(self, q: AgentQuestion) -> int:
         if q.mode == "independent":
@@ -426,6 +435,10 @@ class AgentJudge:
         budget = self.budget_for(q)
         messages: list = [{"role": "user", "content": q.prompt(budget)}]
         ans = AgentAnswer(budget=budget)
+        if self._down >= self.GIVE_UP_AFTER:
+            self.skipped += 1
+            ans.failure = "transport: skipped"
+            return ans
         text = ""
         for _ in range(self.max_turns):
             body = {
@@ -438,9 +451,14 @@ class AgentJudge:
             }
             try:
                 resp = self.transport(body)
+            except Unavailable as e:
+                self._down += 1
+                ans.failure = f"transport: {e}"
+                break
             except RuntimeError as e:
                 ans.failure = f"transport: {e}"
                 break
+            self._down = 0
             self.calls += 1
             ans.calls += 1
             for k, v in (resp.get("usage") or {}).items():

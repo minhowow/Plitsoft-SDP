@@ -580,8 +580,14 @@ def cmd_scan(args) -> int:
         files = list(found.files)
         result.findings, result.agent = run_independent(_agent_root(files, root), pack, load_duties(base), agent, files)
         result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
+        _agent_gave_up(result.agent, agent)
         _emit(args, result, pack, base, root, digest, n_files=len(found))
-        return _exit_code(args, result.findings, found)
+        # 답을 받지 못한 정책은 보지 못한 것이다. 경고가 없다고 0 으로 끝내면 네트워크가 끊긴 실행이 '검토할 것
+        # 없음'이 된다(11/7 실측). 읽지 못한 파일처럼 '불확실'로 센다
+        code = _exit_code(args, result.findings, found)
+        if code == EXIT_OK and result.agent["unanswered"] and args.fail_on == "uncertain" and not args.exit_zero:
+            return EXIT_FINDINGS
+        return code
 
     targets = [Target(path=f, lang=language_of(f)) for f in found.files]
     static = SemgrepBackend().run(compile_static(pack), [t.path for t in targets])
@@ -626,9 +632,23 @@ def cmd_scan(args) -> int:
             result.findings.extend(more.findings)
             result.agent["mode"] = "combined"
         result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
+        _agent_gave_up(result.agent, agent, checker)
 
     _emit(args, result, pack, base, root, digest, n_files=len(found))
     return _exit_code(args, result.findings, found)
+
+
+def _agent_gave_up(record: dict, *judges) -> None:
+    """에이전트가 서비스에 닿지 못해 보내지 않은 질문을 기록에 남기고 알린다. 그 단위는 정적 판정이 그대로 남는다."""
+    skipped = sum(j.skipped for j in {id(j): j for j in judges}.values())
+    if not skipped:
+        return
+    record["questions_skipped"] = skipped
+    print(
+        f"주의: 에이전트 질문이 연달아 {judges[0].GIVE_UP_AFTER}번 서비스에 닿지 못해 남은 질문 {skipped}개는 보내지 "
+        "않았습니다. 그 단위는 정적 판정이 그대로 남고, 독립 검토라면 그 정책은 보지 못했습니다.",
+        file=sys.stderr,
+    )
 
 
 def _exit_code(args, findings, found: Discovery) -> int:
