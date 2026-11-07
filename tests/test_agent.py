@@ -597,6 +597,18 @@ def test_text_and_sarif_show_agent_results(repo):
     assert res["properties"]["agent"]["verdict"] == "not-compliant"
     assert res["relatedLocations"][-1]["message"]["text"] == "에이전트가 인용한 줄"
 
+    # 재확인 단계가 푼 경고도 글과 SARIF 에 실린다(R20)
+    result.agent["recheck"] = {
+        "records": [{**result.agent["records"][0], "entry": "src/chat/Chat.tsx", "policy": "kr.ai-basic-act.31"}]
+    }
+    out = text.render(result, repo, explain=True, color=False)
+    assert "src/chat/Chat.tsx  kr.ai-basic-act.31  → 충족 (찾은 곳 재확인)" in out
+    cleared = sarif.build(result, load_pack(KR_CORE), KR_CORE, repo)["runs"][0]["invocations"][0]["properties"]
+    assert [(c["stage"], c["entry"]) for c in cleared["agent"]["cleared"]] == [
+        ("review", "src/pages/Signup.tsx"),
+        ("recheck", "src/chat/Chat.tsx"),
+    ]
+
     plain = EvalResult(findings=[_finding(repo, "kr.pipa.22-2", "src/pages/Signup.tsx")])
     assert "에이전트" not in text.render(plain, repo, explain=True, color=False)
     assert (

@@ -176,13 +176,27 @@ def _ai_decisions(result: EvalResult, st: Style, root: Path | None) -> list[str]
 
 def _agent_cleared(result: EvalResult, st: Style) -> list[str]:
     """에이전트가 푼 경고. 인용이 관문을 통과했어도 그 줄이 의무를 이행하는지는 사람이 봐야 한다."""
-    cleared = [r for r in (result.agent or {}).get("records", []) if r.get("action") == "cleared"]
+    agent = result.agent or {}
+    # 재확인 단계(결합 방식)가 푼 경고도 싣는다. 빠뜨리면 그 해제를 JSON 에서만 볼 수 있었다(웹 쪽 검토 R20)
+    cleared = [
+        (stage, r)
+        for stage, records in (
+            ("", agent.get("records", [])),
+            ("찾은 곳 재확인", (agent.get("recheck") or {}).get("records", [])),
+        )
+        for r in records
+        if r.get("action") == "cleared"
+    ]
     if not cleared:
         return []
     out = ["", st.bold("에이전트가 해제한 경고") + st.dim("  인용한 줄이 의무를 이행하는지 확인하세요")]
-    for r in cleared:
+    for stage, r in cleared:
         verdict = AGENT_VERDICT.get(r["verdict"], r["verdict"])
-        out.append(f"  {r['entry']}  {r['policy']}  → {verdict}" + (f" — {r['reason']}" if r.get("reason") else ""))
+        out.append(
+            f"  {r['entry']}  {r['policy']}  → {verdict}"
+            + (f" ({stage})" if stage else "")
+            + (f" — {r['reason']}" if r.get("reason") else "")
+        )
         for c in r["citations"]:
             if c.get("ok"):
                 out.append(st.dim(f"    {c['file']}:{c.get('line')} “{str(c.get('text', ''))[:100]}”"))

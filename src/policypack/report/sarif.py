@@ -286,9 +286,11 @@ def _result(f: Finding, rule_index: int, root: Path | None, fp: str) -> dict:
 def _agent_summary(agent: dict) -> dict:
     """SARIF 에 싣는 에이전트 기록. 대화 기록(questions)의 전송 목록은 JSON 보고서에만 둔다."""
     keep = ("judge", "mode", "units", "asked", "actions", "model_calls", "usage", "citations", "citations_rejected")
+    stages = [("review", agent.get("records", [])), ("recheck", (agent.get("recheck") or {}).get("records", []))]
     cleared = [
-        {k: r.get(k) for k in ("policy", "entry", "verdict", "reason", "citations")}
-        for r in agent.get("records", [])
+        {"stage": stage, **{k: r.get(k) for k in ("policy", "entry", "verdict", "reason", "citations")}}
+        for stage, records in stages
+        for r in records
         if r.get("action") == "cleared"
     ]
     return {**{k: agent[k] for k in keep if k in agent}, "cleared": cleared}
