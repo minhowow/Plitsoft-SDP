@@ -1066,6 +1066,19 @@
         "questions_skipped": {
           "type": "integer",
           "minimum": 0
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "에이전트 단계(review·찾기·재확인)에 걸린 시간"
+        },
+        "skipped_reasons": {
+          "type": "object",
+          "description": "보내지 않은 질문의 까닭별 수: unreachable(서비스에 닿지 못함), time(--agent-time-limit)",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "unevaluatedProperties": false

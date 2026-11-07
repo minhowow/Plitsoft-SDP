@@ -22,7 +22,8 @@
 | `run.agent.records[]` | 진입 파일 하나에 대한 답(`verdict`)과 반영 결과(`action`), 인용(`citations`) |
 | `run.agent.discover`, `recheck` | 결합 방식의 찾기·재확인 단계. 모양은 `run.agent` 와 같다 |
 | `run.agent.questions[].sent` | 그 질문에서 밖으로 나간 것: 읽은 파일, 검색어, 검색 결과로 줄이 나간 파일(`matched`), 목록으로 나간 이름 수(`listed`), 가린 비밀값 수. `refused` 는 읽기를 거절한 비밀 파일(나가지 않았다) |
-| `unanswered`, `run.agent.questions_skipped` | 답을 받지 못한 질문, 서비스에 닿지 못해 보내지 않은 질문 |
+| `unanswered`, `run.agent.questions_skipped`, `skipped_reasons` | 답을 받지 못한 질문, 보내지 않은 질문과 그 까닭(`unreachable` 서비스에 닿지 못함, `time` 시간 상한) |
+| `run.agent.seconds` | 에이전트 단계(review·찾기·재확인)에 걸린 시간 |
 | `findings[].agent` | 그 경고에 대한 에이전트의 답. 에이전트를 켜지 않으면 키가 없다 |
 | `raw` | 모델이 낸 글 그대로(읽지 못했거나 잘린 답일 때만). 진단용이고 코드가 섞일 수 있어 화면에 그대로 싣지 않는다 |
 
@@ -49,4 +50,4 @@
 ## 아직 없는 것
 
 - 정책별 요약(정책마다 단위 수와 상태별 수), 결과에 실린 CLI 커밋·검사 시각, 팩 메타데이터 내보내기 명령.
-- 에이전트 단계의 시간 예산과 걸린 시간. `--agent-max-units` 는 review 단계만 묶는다.
+- 찾기 단계는 정책마다 질문 하나라 `--agent-max-units` 로 묶지 않는다(`--agent-time-limit` 으로 묶는다).

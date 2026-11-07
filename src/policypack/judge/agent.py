@@ -19,6 +19,7 @@ import fnmatch
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -421,6 +422,9 @@ class AgentJudge:
     않는다. 질문 하나가 재시도로 100초를 쓰므로, 네트워크가 끊긴 채 질문 열 개면 17분이다(11/7 실측: 끝나지 않아 멈춤).
     400 처럼 그 요청만 거절된 것은 세지 않는다. 보내지 않은 질문은 failure "transport: skipped" 로 답하고
     `skipped` 에 센다.
+
+    `deadline`(time.monotonic 기준)이 지나면 새 질문은 보내지 않고(failure "time: skipped", `skipped` 에 센다), 대화
+    중인 질문은 다음 차례를 보내지 않고 끝낸다(failure "time"). 웹의 실행기처럼 시간이 정해진 곳에서 쓴다.
     """
 
     BUDGET_PER_ENTRY = 5
@@ -436,6 +440,11 @@ class AgentJudge:
         self.usage: dict[str, int] = {}
         self.skipped = 0
         self._down = 0
+        self.deadline: float | None = None
+        self.skip_reasons: dict[str, int] = {}
+
+    def _late(self) -> bool:
+        return self.deadline is not None and time.monotonic() >= self.deadline
 
     def budget_for(self, q: AgentQuestion) -> int:
         if q.mode == "independent":
@@ -447,12 +456,17 @@ class AgentJudge:
         budget = self.budget_for(q)
         messages: list = [{"role": "user", "content": q.prompt(budget)}]
         ans = AgentAnswer(budget=budget)
-        if self._down >= self.GIVE_UP_AFTER:
+        reason = "unreachable" if self._down >= self.GIVE_UP_AFTER else "time" if self._late() else None
+        if reason:
             self.skipped += 1
-            ans.failure = "transport: skipped"
+            self.skip_reasons[reason] = self.skip_reasons.get(reason, 0) + 1
+            ans.failure = "transport: skipped" if reason == "unreachable" else "time: skipped"
             return ans
         text = ""
         for _ in range(self.max_turns):
+            if ans.calls and self._late():
+                ans.failure = "time"
+                break
             body = {
                 "model": self.model,
                 "max_tokens": MAX_TOKENS,

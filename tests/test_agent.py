@@ -230,6 +230,33 @@ def test_agent_stops_asking_once_the_service_is_unreachable(repo):
     assert judge.skipped == 0  # 사이에 답이 오면 다시 센다
 
 
+def test_agent_stops_at_its_deadline(repo):
+    """마감이 지나면 새 질문은 보내지 않고, 대화 중인 질문은 다음 차례를 보내지 않는다(웹 쪽 요청 R10)."""
+    import time
+
+    sent = []
+
+    def slow(body):
+        sent.append(1)
+        return {"content": [tool("list_files")], "usage": {}}
+
+    judge = AgentJudge("m", slow)
+    judge.deadline = time.monotonic() - 1
+    a = judge.ask(Q, repo)
+    assert a.failure == "time: skipped" and sent == [] and judge.skip_reasons == {"time": 1}
+
+    judge = AgentJudge("m", slow)
+    judge.deadline = time.monotonic() + 0.05
+
+    def tick(body):
+        time.sleep(0.06)
+        return slow(body)
+
+    judge.transport = tick
+    a = judge.ask(Q, repo)
+    assert a.failure == "time" and len(sent) == 1
+
+
 def test_build_needs_key():
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
         build("anthropic:m", env={})
@@ -520,6 +547,37 @@ def test_scan_with_agent_adds_records_and_none_stays_plain(tmp_path, monkeypatch
     assert [(Path(f["file"]).name, f["policy"]) for f in doc["findings"] if f["rule"] == "agent-discovered"] == [
         ("chat.ts", "kr.ai-basic-act.31-1")
     ]
+
+
+def test_time_limit_flag_keeps_the_static_result(tmp_path, monkeypatch, capsys):
+    import shutil
+
+    import policypack.judge.agent as agent_mod
+    from policypack.cli import main
+
+    target = tmp_path / "app"
+    target.mkdir()
+    shutil.copy(KR_CORE / "tests" / "pipa-22-2" / "violating.ts", target / "signup.ts")
+    sent = []
+
+    def never(body):
+        sent.append(1)
+        return {"content": answer(), "usage": {}}
+
+    monkeypatch.setattr(agent_mod, "build", lambda spec, budget=20, env=None: AgentJudge("m", never, budget=budget))
+    base = ["scan", str(target), "--output-format", "json", "--agent", "anthropic:m"]
+    assert main([*base, "--agent-time-limit", "0"]) == 2
+    assert "0 보다 커야" in capsys.readouterr().err
+    import itertools
+    import time
+
+    # 시계: 에이전트 단계 시작 0초(마감 1초), 첫 질문 직전 10초(마감이 지남), 끝 15초
+    monkeypatch.setattr(time, "monotonic", itertools.chain([0.0, 10.0], itertools.repeat(15.0)).__next__)
+    assert main([*base, "--agent-time-limit", "1"]) == 1
+    out = capsys.readouterr()
+    agent = json.loads(out.out)["run"]["agent"]
+    assert sent == [] and agent["skipped_reasons"] == {"time": 1} and agent["seconds"] == 15.0
+    assert "시간 상한" in out.err
 
 
 @pytest.mark.parametrize("mode", ["review", "combined", "independent"])

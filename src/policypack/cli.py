@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from dataclasses import dataclass, field
 from importlib import import_module
@@ -111,6 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sc.add_argument("--agent-max-units", type=int, default=None, metavar="N", help="에이전트에게 물을 후보 단위 상한")
     sc.add_argument("--agent-budget", type=int, default=20, metavar="N", help="단위당 에이전트 도구 호출 상한(기본 20)")
+    sc.add_argument(
+        "--agent-time-limit",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help="에이전트 단계 전체의 시간 상한. 넘으면 남은 질문은 보내지 않고 정적 판정을 그대로 둔다",
+    )
     sc.add_argument("--output-format", default="full", choices=["full", "concise", "json", "sarif"])
     sc.add_argument(
         "--fail-on", default="uncertain", choices=["review", "uncertain", "never"], help="무엇까지를 종료 코드 1로 볼지"
@@ -549,6 +557,9 @@ def cmd_scan(args) -> int:
             checker = build_agent(args.agent_recheck, budget=args.agent_budget) if args.agent_recheck else agent
         except ValueError as e:
             raise ConfigError(str(e)) from e
+        # 시계는 에이전트 단계가 시작할 때 맞춘다(_start_agent_clock). 정적 검사 시간은 넣지 않는다
+        if args.agent_time_limit is not None and args.agent_time_limit <= 0:
+            raise ConfigError("--agent-time-limit 는 0 보다 커야 합니다")
         if found.files:
             from policypack.judge.http import endpoint
 
@@ -578,8 +589,10 @@ def cmd_scan(args) -> int:
 
         result = EvalResult(judge_id="", skipped=[str(p) for p in found.skipped_files()])
         files = list(found.files)
+        t0 = _start_agent_clock(args, agent)
         result.findings, result.agent = run_independent(_agent_root(files, root), pack, load_duties(base), agent, files)
         result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
+        result.agent["seconds"] = round(time.monotonic() - t0, 3)
         _agent_gave_up(result.agent, agent)
         _emit(args, result, pack, base, root, digest, n_files=len(found))
         # 답을 받지 못한 정책은 보지 못한 것이다. 경고가 없다고 0 으로 끝내면 네트워크가 끊긴 실행이 '검토할 것
@@ -613,6 +626,7 @@ def cmd_scan(args) -> int:
 
         files, duties = list(found.files), load_duties(base)
         agent_root = _agent_root(files, root)
+        t0 = _start_agent_clock(args, agent, checker)
         result.agent = run_agent_pass(result, agent_root, pack, duties, agent, files, max_units=args.agent_max_units)
         if args.agent_mode == "combined":
             from policypack.evaluate.agent_pass import run_independent
@@ -626,27 +640,50 @@ def cmd_scan(args) -> int:
             # 찾기 단계는 이행 근거를 덜 찾는다(dev 실측: 찾은 경고 26개 중 12개가 실제로는 충족). 찾은 곳을 review 와
             # 같은 방식(진입 파일 + 함께 볼 파일, 인용 관문)으로 한 번 더 묻는다
             more = EvalResult(findings=found_more)
-            result.agent["recheck"] = run_agent_pass(more, agent_root, pack, duties, checker, files)
+            result.agent["recheck"] = run_agent_pass(
+                more, agent_root, pack, duties, checker, files, max_units=args.agent_max_units
+            )
             if checker is not agent:
                 result.agent["recheck_total_usage"] = checker.usage
             result.findings.extend(more.findings)
             result.agent["mode"] = "combined"
         result.agent["total_model_calls"], result.agent["total_usage"] = agent.calls, agent.usage
+        result.agent["seconds"] = round(time.monotonic() - t0, 3)
         _agent_gave_up(result.agent, agent, checker)
 
     _emit(args, result, pack, base, root, digest, n_files=len(found))
     return _exit_code(args, result.findings, found)
 
 
+def _start_agent_clock(args, *judges) -> float:
+    """에이전트 단계의 시작 시각. --agent-time-limit 이 있으면 판정기마다 같은 마감을 건다."""
+    t0 = time.monotonic()
+    if args.agent_time_limit is not None:
+        for j in judges:
+            j.deadline = t0 + args.agent_time_limit
+    return t0
+
+
 def _agent_gave_up(record: dict, *judges) -> None:
-    """에이전트가 서비스에 닿지 못해 보내지 않은 질문을 기록에 남기고 알린다. 그 단위는 정적 판정이 그대로 남는다."""
-    skipped = sum(j.skipped for j in {id(j): j for j in judges}.values())
+    """에이전트가 보내지 않은 질문(서비스에 닿지 못함, 시간 상한)을 기록에 남기고 알린다. 그 단위는 정적 판정이
+    그대로 남는다."""
+    unique = list({id(j): j for j in judges}.values())
+    reasons: dict[str, int] = {}
+    for j in unique:
+        for k, v in j.skip_reasons.items():
+            reasons[k] = reasons.get(k, 0) + v
+    skipped = sum(reasons.values())
     if not skipped:
         return
-    record["questions_skipped"] = skipped
+    record["questions_skipped"], record["skipped_reasons"] = skipped, reasons
+    why = []
+    if reasons.get("unreachable"):
+        why.append(f"연달아 {judges[0].GIVE_UP_AFTER}번 서비스에 닿지 못해 {reasons['unreachable']}개")
+    if reasons.get("time"):
+        why.append(f"시간 상한(--agent-time-limit)이 지나 {reasons['time']}개")
     print(
-        f"주의: 에이전트 질문이 연달아 {judges[0].GIVE_UP_AFTER}번 서비스에 닿지 못해 남은 질문 {skipped}개는 보내지 "
-        "않았습니다. 그 단위는 정적 판정이 그대로 남고, 독립 검토라면 그 정책은 보지 못했습니다.",
+        f"주의: 에이전트 질문 가운데 {' · '.join(why)}는 보내지 않았습니다. 그 단위는 정적 판정이 그대로 남고, "
+        "독립 검토라면 그 정책은 보지 못했습니다.",
         file=sys.stderr,
     )
 
