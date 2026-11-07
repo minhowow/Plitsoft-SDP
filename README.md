@@ -336,7 +336,7 @@ Opengrep(Semgrep CE 의 LGPL-2.1 포크)으로 갈아탈 수도 있다. 라이�
 |---|---|
 | `src/policypack/` | 제품 코드 |
 | `policies/kr-core/` | 내장 정책 팩, 조문 원문(`_legal/`), 픽스처(`tests/`) |
-| `schemas/` | 정책 팩·테스트 파일의 JSON Schema (`policypack schema --write` 가 만든다) |
+| `schemas/` | 정책 팩·테스트 파일의 JSON Schema (`policypack schema --write` 가 만든다)와 scan 보고서의 스키마(`report-1.json`, 손으로 쓴다. [docs/output.md](docs/output.md)) |
 | `tests/` | pytest |
 | `scripts/` | 보고서에서 운영 지표(인용 관문 거절, 가린 비밀값, 비용)를 모으는 `metrics.py` |
 | `docs/` | 방향, 구조, 일정, 결정 기록, 국내 법 의무 지도, 보고서 위치 ([docs/README.md](docs/README.md)) |

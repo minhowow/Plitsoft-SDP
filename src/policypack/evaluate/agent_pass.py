@@ -76,7 +76,16 @@ def _question(pol, duties: dict[str, dict], policy_id: str, **kw) -> AgentQuesti
 
 
 def _sent(ans: AgentAnswer) -> dict:
-    return {"read": ans.read_files, "searches": ans.searches, "masked": ans.masked}
+    """이 질문에서 밖으로 나간 것. 읽은 파일, 검색어와 검색 결과로 줄이 나간 파일, 목록으로 나간 이름 수,
+    가린 비밀값 수. refused 는 나가지 않은 것(비밀값이 있을 수 있어 읽기를 거절한 파일)이다."""
+    return {
+        "read": ans.read_files,
+        "searches": ans.searches,
+        "matched": ans.matched_files,
+        "listed": ans.listed,
+        "refused": ans.refused,
+        "masked": ans.masked,
+    }
 
 
 def _summary(judge: AgentJudge, records: list[dict], questions: list[dict], extra: dict) -> dict:

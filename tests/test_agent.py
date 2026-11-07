@@ -144,6 +144,10 @@ def test_tools_stay_inside_and_mask(repo):
     assert t.masked == {"api-key": 1}
     assert t.read == ["src/config.ts"]
     assert "도구 오류" in t.call("read_file", {})
+    # 전송 기록(R26): 검색 결과로 줄이 나간 파일, 목록으로 나간 이름 수, 읽기를 거절한 비밀 파일
+    assert t.matched == [".env.example"] and t.refused == [".env"]
+    names = t.call("list_files", {"path": "src"})
+    assert t.listed == len(names.splitlines()) == 4
 
 
 # ── 판정기 ────────────────────────────────────────────────────────────

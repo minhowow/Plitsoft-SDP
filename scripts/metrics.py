@@ -9,7 +9,8 @@
   인용 관문   에이전트가 낸 인용 가운데 관문이 거절한 수와 비율
               (코드에 글자 그대로 없거나, 진입 파일 밖이거나, 저장소 밖)
   해제        에이전트가 인용으로 푼 경고(cleared), 정적 경고를 확인한 것(confirmed), 새로 찾은 경고(warned)
-  외부 전송   에이전트가 읽은 파일 수, 가린 비밀값 수(종류별), 답을 받지 못한 질문
+  외부 전송   에이전트가 읽었거나 검색 결과로 줄이 나간 파일 수, 읽기를 거절한 비밀 파일 수, 가린 비밀값 수(종류별),
+              답을 받지 못한 질문
   비용        모델 호출, 토큰, 어림 금액(보수 단가: 아래 PRICES, 100만 토큰당 달러), 정적 검사 시간
 
 어림 금액은 캐시 쓰기를 입력 단가의 1.25배, 캐시 읽기를 0.1배로 센다. 청구액은 Console 이 맞다.
@@ -60,6 +61,7 @@ def one(path: Path) -> dict:
     actions: Counter = Counter()
     masked: Counter = Counter()
     read: set[str] = set()
+    refused: set[str] = set()
     cites = rejected = unanswered = calls = 0
     tokens_in = tokens_out = 0
     cost = 0.0
@@ -70,7 +72,8 @@ def one(path: Path) -> dict:
         for q in st.get("questions", []):
             unanswered += bool(q.get("failure"))
             sent = q.get("sent") or {}
-            read.update(sent.get("read", []))
+            read.update(sent.get("read", []), sent.get("matched", []))
+            refused.update(sent.get("refused", []))
             masked.update(sent.get("masked", {}))
         u = st.get("usage", {})
         calls += st.get("model_calls", 0)
@@ -90,6 +93,7 @@ def one(path: Path) -> dict:
         unanswered=unanswered,
         skipped=agent.get("questions_skipped", 0),
         files_read=len(read),
+        refused=len(refused),
         masked=dict(masked),
         model_calls=calls,
         tokens_in=tokens_in,
@@ -126,7 +130,8 @@ def table(rows: list[dict]) -> str:
             "새 경고",
             "인용 거절",
             "못 받은 답",
-            "읽은 파일",
+            "나간 파일",
+            "거절한 비밀 파일",
             "가림",
             "호출",
             "입력 토큰",
@@ -144,6 +149,7 @@ def table(rows: list[dict]) -> str:
                 rate(r.get("citations_rejected", 0), r.get("citations", 0)),
                 r.get("unanswered", 0),
                 r.get("files_read", 0),
+                r.get("refused", 0),
                 sum(r.get("masked", {}).values()),
                 r.get("model_calls", 0),
                 f"{r.get('tokens_in', 0):,}",

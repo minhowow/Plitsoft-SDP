@@ -147,12 +147,16 @@ JSON 하나만 답한다. 앞뒤에 다른 글을 붙이지 않는다.
 class RepoTools:
     """저장소 폴더 하나에 갇힌 읽기 전용 도구. 결과는 나가기 전에 egress.mask 를 거치고, 비밀값 파일은 읽지 않는다.
 
-    읽은 파일(`read`)과 가린 수(`masked`)를 모아 두었다가 전송 기록에 싣는다."""
+    읽은 파일(`read`), 검색 결과로 줄이 나간 파일(`matched`), 파일 목록으로 나간 이름 수(`listed`), 읽지 않은 비밀
+    파일(`refused`), 가린 수(`masked`)를 모아 두었다가 전송 기록에 싣는다."""
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.read: list[str] = []
         self.searched: list[str] = []
+        self.matched: list[str] = []
+        self.listed = 0
+        self.refused: list[str] = []
         self.masked: dict[str, int] = {}
 
     def _path(self, rel: str | None) -> Path:
@@ -185,6 +189,7 @@ class RepoTools:
             if len(out) >= LIST_MAX:
                 out.append(f"… ({LIST_MAX}개에서 자름)")
                 break
+        self.listed += len([r for r in out if not r.startswith("… (")])
         return "\n".join(out) or "(파일 없음)"
 
     def read_file(self, path: str, start_line: int = 1, end_line: int | None = None) -> str:
@@ -193,6 +198,8 @@ class RepoTools:
             return "그런 파일이 없다"
         rel = p.relative_to(self.root).as_posix()
         if is_secret_file(rel):
+            if rel not in self.refused:
+                self.refused.append(rel)
             return "비밀값이 들어 있을 수 있는 파일이라 읽지 않는다"
         if p.stat().st_size > FILE_MAX:
             return "파일이 너무 크다(1MB 초과)"
@@ -231,6 +238,8 @@ class RepoTools:
             for i, line in enumerate(text.splitlines(), 1):
                 if rx.search(line):
                     hits.append(f"{rel}:{i}: {line.strip()[:200]}")
+                    if rel not in self.matched:
+                        self.matched.append(rel)
                     if len(hits) >= SEARCH_HITS:
                         return self._out("\n".join(hits) + f"\n… ({SEARCH_HITS}개에서 자름)")
         return self._out("\n".join(hits)) or "(찾은 것 없음)"
@@ -357,6 +366,9 @@ class AgentAnswer:
     transcript: list = field(default_factory=list)
     read_files: list[str] = field(default_factory=list)
     searches: list[str] = field(default_factory=list)
+    matched_files: list[str] = field(default_factory=list)
+    listed: int = 0
+    refused: list[str] = field(default_factory=list)
     masked: dict = field(default_factory=dict)
     raw: str = ""
     stop_reason: str | None = None
@@ -485,6 +497,7 @@ class AgentJudge:
         else:
             ans.failure = "turns"
         ans.read_files, ans.searches, ans.masked = tools.read, tools.searched, tools.masked
+        ans.matched_files, ans.listed, ans.refused = tools.matched, tools.listed, tools.refused
         if ans.failure:
             return ans
         ans.raw = text[:2000]
