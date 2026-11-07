@@ -53,7 +53,7 @@
 | 외부 전송 통제 | `egress.py` | 끝(8cd5048). 전화·이메일은 이행 근거라 가리지 않음 |
 | PII→외부 AI 정책(개인정보 보호법 제28조의8·제26조) | `policies/kr-core/` | 끝(11/7). `kr.pipa.28-8`, 픽스처 33개 |
 | AI 실패 시 정적 결과 유지 시험 | `tests/`, `judge/` | 끝(11/7). 끊기면 두 질문 뒤 멈춤, 독립 검토는 1로 끝남 |
-| 운영 지표 뽑기(관문 거절률, 가린 수, 비용) | 스크립트 | 12주 |
+| 운영 지표 뽑기(관문 거절률, 가린 수, 비용) | `scripts/metrics.py` | 끝(11/7) |
 | Claude Code 훅, GitLab Code Quality 출력 | `integrations/`, `report/` | 13주 |
 
 ## 만들며 알게 된 것 (11/3 dev 저장소 20곳, 원자료 `~/.cache/policypack-eval/agent-dev-2026-11-03/`)
