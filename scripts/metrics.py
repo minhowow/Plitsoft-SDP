@@ -54,12 +54,13 @@ def one(path: Path) -> dict:
         "uncertain": outcomes.get("needs-review-uncertain", 0),
         "static_seconds": run.get("static_seconds") or 0.0,
         "agent": False,
+        "masked": dict(run.get("judge_masked") or {}),
     }
     agent = run.get("agent")
     if not agent:
         return row
     actions: Counter = Counter()
-    masked: Counter = Counter()
+    masked: Counter = Counter(row["masked"])
     read: set[str] = set()
     refused: set[str] = set()
     cites = rejected = unanswered = calls = 0

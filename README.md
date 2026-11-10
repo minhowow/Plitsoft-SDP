@@ -123,12 +123,14 @@ GitHub Actions 의 호스티드 러너에는 Python 과 pipx 가 이미 있다. 
 - run: policypack scan --diff origin/main --output-format sarif > policypack.sarif
 ```
 
-GitLab 은 `--output-format gitlab` 으로 Code Quality 보고서를 내면 머지 요청의 위젯과 바뀐 줄 옆에 경고가 뜬다.
-붙여 넣을 작업 정의는 [`examples/gitlab-ci.yml`](examples/gitlab-ci.yml) 이다. 종료 코드 1(경고)은 `allow_failure`
-로 넘기고 2(도구 오류)에서만 멈춘다. 지문은 SARIF 의 `partialFingerprints` 와 같은 값이다.
+GitLab 은 `--output-format gitlab` 으로 Code Quality 보고서를 낸다. 무료 판에서는 머지 요청 화면의 Code Quality
+보고서에 새로 생긴 경고와 사라진 경고가 나온다(바뀐 줄 옆 표시는 Ultimate). GitLab 이 기본 가지의 보고서와 견주므로
+기본 가지와 머지 요청 모두 저장소 전체를 검사한다. 붙여 넣을 작업 정의는 [`examples/gitlab-ci.yml`](examples/gitlab-ci.yml)
+이다. 종료 코드 1(경고)은 `allow_failure` 로 넘기고 2(도구 오류)에서만 멈춘다. 지문은 SARIF 의 `partialFingerprints`
+와 같은 값이다.
 
 **Claude Code 훅.** Claude Code 가 JS/TS 파일을 고칠 때마다 그 파일을 검사하고, 확실한 '검토 필요'가 있으면
-경고와 개발자에게 할 질문을 Claude 에게 돌려준다. Claude 는 고칠 수 있는 것은 고치고, 사업상 판단이 필요한 것은
+경고와 개발자에게 할 질문을 Claude 에게 돌려주고 사용자 화면에 한 줄로 알린다. Claude 는 고칠 수 있는 것은 고치고, 사업상 판단이 필요한 것은
 사용자에게 묻는다. [`examples/claude-code-settings.json`](examples/claude-code-settings.json) 을 프로젝트의
 `.claude/settings.json` 에 합친다(`policypack` 이 PATH 에 있어야 한다).
 
@@ -280,11 +282,12 @@ policypack 은 **MIT** 다(LICENSE). 자세한 목록은 [NOTICE](NOTICE) 에 �
 실행할 때 stderr 에 이 사실을 알린다.
 
 에이전트 검토(`--agent`)를 켜면 에이전트가 도구로 **고른 파일**이 나간다. 경고가 난 파일에서 시작해
-같은 저장소의 다른 파일을 읽고 검색하므로, 판정자보다 넓다. 그래서 나가기 전에 이렇게 한다(`egress.py`).
+같은 저장소의 다른 파일을 읽고 검색하므로, 판정자보다 넓다. 판정자와 에이전트 모두 나가기 전에 이렇게 한다(`egress.py`).
 
 - 개인키, 알려진 키 모양(AWS·GitHub·Slack·Google·`sk-…` 등), JWT, 비밀처럼 이름 붙은 변수의 긴 문자열,
-  주민등록번호·카드 번호 모양을 `[가림:<종류>]` 로 바꾼다.
-- `.env`·`.env.local`·`*.pem`·`*.key`·`id_rsa` 같은 파일은 읽지 않는다(`.env.example` 은 읽는다).
+  주민등록번호·카드 번호 모양을 `[가림:<종류>]` 로 바꾼다. 줄 수는 그대로 둔다. 판정자에게 보내기 전에 가린 수는
+  JSON 보고서 `run.judge_masked` 에 남는다.
+- 에이전트는 `.env`·`.env.local`·`*.pem`·`*.key`·`id_rsa` 같은 파일을 읽지 않는다(`.env.example` 은 읽는다).
 - 에이전트가 읽은 파일, 검색어, 가린 수를 질문마다 JSON 보고서 `run.agent.questions[].sent` 에 남긴다.
 - 전화번호·이메일·회사 이름은 가리지 않는다. 광고 전송자 연락처처럼 의무를 이행하는 근거라서다. 가린 것도
   모양으로 찾는 것이라 빠지는 비밀값이 있을 수 있다.

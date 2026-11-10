@@ -17,6 +17,11 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
   CLI 의 시험이 스키마를 함께 고치게 하려는 것이다. 웹이 이 스키마로 엄격하게 검사하면 CLI 가 키를 더할 때 깨진다.
 - 파일 경로는 모두 검사 루트(git 저장소면 그 뿌리)에서의 상대 경로다.
 
+## 판정자(`--judge`)의 키
+
+`run.judge`(실제 모델 id), `run.judge_usage`(토큰 합), `run.judge_masked`(보내기 전에 가린 비밀값 수, 종류별. 가린 것이
+있을 때만), `questions_sent`·`questions_skipped`.
+
 ## 에이전트 검토(`--agent`)의 키
 
 `run.agent`, `findings[].agent` 와 그 안의 `reason`·`citations` 는 `schema_version` 1 의 계약이다. 정확도 실험을 하지

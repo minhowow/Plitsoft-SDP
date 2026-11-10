@@ -472,6 +472,8 @@ class EvalResult:
     judge_usage: dict | None = None
     """API 판정자(anthropic:)의 토큰 사용량 합. claude-cli 판정자는 알 수 없어 None 이다.
     보고서 run 에 있을 때만 싣는다."""
+    judge_masked: dict | None = None
+    """판정자에게 보내기 전에 가린 비밀값 수(종류별). 가린 것이 없으면 None 이고 보고서에 싣지 않는다."""
     agent: dict | None = None
     """에이전트 검토 단계(`--agent`)의 기록(evaluate.agent_pass). 돌리지 않았으면 None 이고 보고서에 싣지 않는다."""
 

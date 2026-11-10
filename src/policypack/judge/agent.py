@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from policypack.egress import is_secret_file, mask
+from policypack.egress import is_secret_file, marks, mask
 from policypack.judge.http import Transport, Unavailable, http_transport
 
 Verdict = Literal["compliant", "not-compliant", "not-applicable", "unknown"]
@@ -175,10 +175,15 @@ class RepoTools:
                     yield f
 
     def _out(self, text: str) -> str:
-        text, counts = mask(text)
-        for k, v in counts.items():
+        """나가는 글. 이미 가린 글이라 가린 수만 센다."""
+        for k, v in marks(text).items():
             self.masked[k] = self.masked.get(k, 0) + v
         return text
+
+    @staticmethod
+    def _masked_lines(text: str) -> list[str]:
+        """파일 전체를 가린 뒤의 줄. 일부만 가리면 개인키 블록의 중간부터 읽을 때 본문이 그대로 나간다."""
+        return mask(text)[0].splitlines()
 
     def list_files(self, path: str = ".", pattern: str | None = None) -> str:
         out = []
@@ -204,7 +209,7 @@ class RepoTools:
             return "비밀값이 들어 있을 수 있는 파일이라 읽지 않는다"
         if p.stat().st_size > FILE_MAX:
             return "파일이 너무 크다(1MB 초과)"
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = self._masked_lines(p.read_text(encoding="utf-8", errors="replace"))
         start = max(1, int(start_line or 1))
         end = min(len(lines), int(end_line) if end_line else start + READ_LINES - 1, start + READ_LINES - 1)
         body, size = [], 0
@@ -236,9 +241,13 @@ class RepoTools:
                 text = f.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            for i, line in enumerate(text.splitlines(), 1):
+            raw = text.splitlines()
+            shown = self._masked_lines(text)
+            if len(shown) != len(raw):  # 가린 글의 줄이 어긋나면(줄 바꿈 문자가 섞인 비밀값) 줄마다 가린다
+                shown = [mask(line)[0] for line in raw]
+            for i, line in enumerate(raw, 1):
                 if rx.search(line):
-                    hits.append(f"{rel}:{i}: {line.strip()[:200]}")
+                    hits.append(f"{rel}:{i}: {shown[i - 1].strip()[:200]}")
                     if rel not in self.matched:
                         self.matched.append(rel)
                     if len(hits) >= SEARCH_HITS:

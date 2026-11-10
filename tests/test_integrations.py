@@ -70,6 +70,7 @@ def test_hook_reports_a_needs_review_file_to_claude(capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block"
     assert "violating.ts" in out["reason"] and "제22조의2" in out["reason"]
+    assert out["systemMessage"].startswith("policypack: violating.ts 에 법·정책 검토 필요 1건")
 
 
 def test_hook_is_quiet_on_a_compliant_file(capsys):
@@ -81,6 +82,7 @@ def test_hook_is_quiet_on_a_compliant_file(capsys):
     "payload",
     [
         _payload(VIOLATING, tool="Read"),
+        _payload(VIOLATING, tool="MultiEdit"),  # 지금의 Claude Code 에는 없는 도구 이름이다
         _payload("README.md"),
         _payload("없는/파일.ts"),
         json.dumps({"tool_name": "Write", "tool_input": {}}),
@@ -114,9 +116,10 @@ def test_hook_only_blocks_on_certain_findings_and_never_calls_ai():
 
 
 def test_hook_tool_error_is_not_a_block(capsys):
-    assert claude_code.run(_payload(VIOLATING), None, lambda argv: 2) == 1
-    captured = capsys.readouterr()
-    assert captured.out == "" and "검사하지 못했습니다" in captured.err
+    """검사하지 못하면 사용자에게만 알린다(systemMessage). Claude 에게 경고를 돌려주지 않는다."""
+    assert claude_code.run(_payload(VIOLATING), None, lambda argv: 2) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert set(out) == {"systemMessage"} and "검사하지 못했습니다" in out["systemMessage"]
 
 
 def test_hook_rejects_non_json(capsys):

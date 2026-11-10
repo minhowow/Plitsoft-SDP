@@ -1,6 +1,7 @@
 """GitLab Code Quality 보고서(CodeClimate 형식의 부분 집합).
 
-GitLab 은 `artifacts:reports:codequality` 로 받은 파일을 머지 요청의 변경 줄 옆과 위젯에 보여 준다. 받는 키는
+GitLab 은 `artifacts:reports:codequality` 로 받은 파일을 기본 가지의 보고서와 견줘 머지 요청 화면에 새 경고·사라진
+경고로 보여 준다(무료 판. 바뀐 줄 옆 표시는 Ultimate). 받는 키는
 `description` · `check_name` · `fingerprint` · `severity` · `location.path` · `location.lines.begin` 이다.
 SARIF 와 달리 규칙 설명을 실을 자리가 없어서 조문 이름과 개발자에게 할 질문을 `description` 한 줄에 넣는다.
 

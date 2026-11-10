@@ -13,7 +13,8 @@
 읽지 않는 파일
   - `.env`, `.env.local` 같은 환경 파일(`.env.example`·`.sample`·`.template` 은 읽는다), `*.pem`·`*.key`·`id_rsa`
 
-가린 자리는 `[가림:<종류>]` 로 바꾼다. 가린 수는 전송 기록에 남는다.
+가린 자리는 `[가림:<종류>]` 로 바꾼다. 가린 수는 전송 기록에 남는다. 여러 줄에 걸친 것(개인키 블록)을 가려도 줄
+수는 그대로다. 에이전트는 파일 전체를 가린 뒤 줄 번호로 잘라 보내고, 모델이 적은 줄 번호를 관문이 다시 구한다.
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ def mask(text: str) -> tuple[str, dict[str, int]]:
     def sub(kind: str, rx: re.Pattern, s: str) -> str:
         def repl(m: re.Match) -> str:
             counts[kind] = counts.get(kind, 0) + 1
-            return f"[가림:{kind}]"
+            return f"[가림:{kind}]" + "\n" * m.group(0).count("\n")
 
         return rx.sub(repl, s)
 
@@ -90,3 +91,14 @@ def mask(text: str) -> tuple[str, dict[str, int]]:
 
     text = _CARD.sub(card, text)
     return text, counts
+
+
+_MARK = re.compile(r"\[가림:([\w-]+)\]")
+
+
+def marks(text: str) -> dict[str, int]:
+    """가린 글에서 실제로 내보내는 부분의 가린 수(종류별). 파일 전체를 가린 뒤 일부만 보낼 때 쓴다."""
+    counts: dict[str, int] = {}
+    for m in _MARK.finditer(text):
+        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+    return counts

@@ -56,6 +56,8 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             "coverage_complete": result.coverage_complete,
             # 에이전트 검토 단계를 돌렸을 때만 싣는다(--agent). 판정기, 후보 단위, 인용 관문 결과, 사용량
             **({"judge_usage": result.judge_usage} if result.judge_usage else {}),
+            # 판정자에게 보내기 전에 가린 비밀값 수(종류별). 가린 것이 있을 때만
+            **({"judge_masked": result.judge_masked} if result.judge_masked else {}),
             **({"agent": result.agent} if result.agent is not None else {}),
             **(meta or {}),
         },

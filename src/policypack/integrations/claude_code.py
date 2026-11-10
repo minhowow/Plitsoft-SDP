@@ -1,20 +1,21 @@
 """Claude Code 의 PostToolUse 훅.
 
-Claude Code 가 파일을 고칠 때마다(Edit·Write·MultiEdit) 그 파일 하나를 정적 조건으로만 검사한다. AI 를 부르지
+Claude Code 가 파일을 고칠 때마다(Edit·Write) 그 파일 하나를 정적 조건으로만 검사한다. AI 를 부르지
 않고 아무것도 밖으로 보내지 않는다. 훅은 편집마다 돌아서 빨라야 하고, 코드를 이미 Claude 에게 보낸 사람이라도
 다른 서비스로 보내는 것은 따로 동의할 일이다.
 
     .claude/settings.json
-    {"hooks": {"PostToolUse": [{"matcher": "Edit|Write|MultiEdit",
+    {"hooks": {"PostToolUse": [{"matcher": "Edit|Write",
         "hooks": [{"type": "command", "command": "policypack hook claude-code", "timeout": 60}]}]}}
 
 Claude Code 는 stdin 으로 `{"tool_name", "tool_input": {"file_path"}, "cwd", ...}` 를 준다. 결과는 이렇게 돌려준다.
 
-- 확실한 '검토 필요'가 있으면 stdout 에 `{"decision": "block", "reason": ...}` 을 내고 0 으로 끝난다. Claude Code 는
-  `reason` 을 Claude 에게 보여 준다. 편집은 이미 됐다 — 막는 것이 아니라 Claude 가 경고를 읽고 이어 가게 한다.
+- 확실한 '검토 필요'가 있으면 stdout 에 `{"decision": "block", "reason": ..., "systemMessage": ...}` 을 내고 0 으로
+  끝난다. Claude Code 는 `reason` 을 Claude 에게, `systemMessage` 한 줄을 사용자에게 보여 준다. 편집은 이미 됐다 —
+  막는 것이 아니라 Claude 가 경고를 읽고 이어 가게 한다.
 - '불확실'만 있으면 알리지 않는다. 정적 조건만 쓰면 AI 에게 물을 곳이 모두 '불확실'로 남아 편집마다 끼어든다.
 - JS/TS 가 아니거나 생성물(node_modules·dist·축소 번들 등)이면 검사하지 않고 0 으로 끝난다.
-- 도구 오류는 1 로 끝낸다. Claude Code 는 0·2 가 아닌 종료를 사용자에게만 알리고 편집을 이어 간다.
+- 검사하지 못하면 `systemMessage` 로 사용자에게만 알리고 0 으로 끝난다. Claude 의 편집은 이어 간다.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-TOOLS = frozenset({"Edit", "Write", "MultiEdit"})
+TOOLS = frozenset({"Edit", "Write"})
 
 REASON_HEAD = (
     "policypack(국내 법·정책 검토)이 방금 고친 파일에서 법·정책상 검토가 필요한 지점을 찾았습니다. "
@@ -82,7 +83,20 @@ def run(stdin: str, config: str | None, scan: Callable[[list[str]], int]) -> int
     if code == 0:
         return 0
     if code != 1:
-        print(f"policypack 훅: 검사하지 못했습니다(종료 코드 {code}).\n{err.getvalue().strip()}", file=sys.stderr)
-        return 1
-    print(json.dumps({"decision": "block", "reason": f"{REASON_HEAD}\n\n{out.getvalue().strip()}"}, ensure_ascii=False))
+        why = err.getvalue().strip().splitlines()
+        note = f"policypack 훅: {path.name} 을 검사하지 못했습니다(종료 코드 {code}). {why[-1] if why else ''}".strip()
+        print(json.dumps({"systemMessage": note}, ensure_ascii=False))
+        return 0
+    report = out.getvalue().strip()
+    n = sum(1 for line in report.splitlines() if "  검토 필요  " in line)
+    print(
+        json.dumps(
+            {
+                "decision": "block",
+                "reason": f"{REASON_HEAD}\n\n{report}",
+                "systemMessage": f"policypack: {path.name} 에 법·정책 검토 필요 {n}건 — Claude 에게 전했습니다",
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0

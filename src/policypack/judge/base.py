@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -117,6 +118,10 @@ class OncePerRun:
     나머지 질문을 버렸다). 묻지 않은 질문은 부르지 못한 것(transport)으로 답해 'AI 확인 필요'로 남고 `skipped` 에 센다.
 
     정책 테스트의 스텁 판정자는 감싸지 않는다. 스텁은 (픽스처, 정책, 규칙, 조건)마다 답이 따로다.
+
+    실제 판정자로 가는 길은 이것 하나라 비밀값도 여기서 가린다(egress.mask, 줄 수는 그대로). 가린 줄을 인용한 답은
+    코드에 없는 인용이라 관문을 넘지 못하고 '불확실'로 남는다. 가린 수는 `masked` 에 모아 보고서 run.judge_masked 에
+    싣는다.
     """
 
     GIVE_UP_AFTER = 3
@@ -128,6 +133,7 @@ class OncePerRun:
         self._timeouts = 0
         self.skipped = 0
         self.sent = 0
+        self.masked: dict[str, int] = {}
 
     def ask(self, q: Question) -> Answer:
         key = hashlib.sha256(q.prompt().encode("utf-8")).hexdigest()
@@ -137,11 +143,21 @@ class OncePerRun:
             self.skipped += 1
             a = Answer(raw="?", failure="transport")
         else:
-            a = self.inner.ask(q)
+            a = self.inner.ask(self._mask(q))
             self.sent += 1
             self._timeouts = self._timeouts + 1 if a.failure == "timeout" or a.unreachable else 0
         self._answers[key] = a
         return a
+
+    def _mask(self, q: Question) -> Question:
+        from policypack.egress import mask
+
+        code, c1 = mask(q.code)
+        header, c2 = mask(q.header)
+        for counts in (c1, c2):
+            for k, v in counts.items():
+                self.masked[k] = self.masked.get(k, 0) + v
+        return dataclasses.replace(q, code=code, header=header) if c1 or c2 else q
 
 
 # ── 응답 해석 ───────────────────────────────────────────────────────────────

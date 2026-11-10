@@ -328,14 +328,15 @@ _TELEMETRY_VARS = ("CLAUDE_CODE_ENABLE_TELEMETRY", "OTEL_LOG_USER_PROMPTS", "OTE
 def _egress_notice(spec: str, env: dict | None = None) -> str:
     """AI 판정자를 켰을 때 무엇이 어디로 나가는지 알린다.
 
-    이 도구에서 코드가 기계 밖으로 나가는 경로는 이것 하나다. 실행할 때마다 정확한 범위를 알린다.
+    판정자로 코드가 나가는 범위를 실행할 때마다 정확히 알린다. 에이전트(--agent)의 알림은 cmd_scan 에 있다.
     """
     from policypack.discover import MAX_BYTES
     from policypack.evaluate import engine
 
     env = os.environ if env is None else env
     lines = [
-        f"알림: AI 판정자 {spec} 를 씁니다. {_EGRESS_SCOPE}의 코드가 판정자에게 전송됩니다.",
+        f"알림: AI 판정자 {spec} 를 씁니다. {_EGRESS_SCOPE}의 코드가 판정자에게 전송됩니다"
+        "(키·토큰·개인키 같은 비밀값은 가립니다. 전화번호·이메일은 가리지 않습니다).",
         f"      파일 단위 규칙: 파일의 전체 내용({MAX_BYTES // 1_000_000}MB 미만).",
         "      함수 단위 규칙(scope: anchor): 앵커를 감싼 함수와, 같은 파일에서 그 함수가 쓰는 최상위 선언"
         f"(각 {engine.DECL_MAX_LINES}줄까지)·import, 그 함수를 부르는 줄(이름 없는 콜백이면 같은 문장의 앞줄 "
@@ -622,6 +623,7 @@ def cmd_scan(args) -> int:
     result.questions_sent = getattr(judge, "sent", 0)
     result.questions_skipped = getattr(judge, "skipped", 0)
     result.judge_usage = getattr(getattr(judge, "inner", None), "usage", None) or None
+    result.judge_masked = dict(getattr(judge, "masked", None) or {}) or None
     if getattr(judge, "skipped", 0):
         print(
             f"주의: 판정자가 연달아 {judge.GIVE_UP_AFTER}번 시간 안에 답하지 않아 남은 질문 {judge.skipped}개는 "

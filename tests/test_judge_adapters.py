@@ -411,6 +411,32 @@ def test_an_unreachable_api_judge_is_given_up_on_and_reports_its_real_model():
     assert {judge.ask(q).failure for q in _questions(5)} == {"transport"} and judge.skipped == 0
 
 
+def test_the_judge_never_sees_secrets():
+    """판정자(--judge)로 가는 코드도 에이전트처럼 비밀값을 가린다. 줄 수는 그대로라 인용의 줄이 맞는다.
+    가린 수는 보고서 run.judge_masked 로 간다."""
+    from policypack.judge.base import Answer, OncePerRun
+
+    seen = []
+
+    class Inner:
+        id = "x"
+
+        def ask(self, q):
+            seen.append(q)
+            return Answer(raw="아니오")
+
+    key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEsecretbody\n-----END RSA PRIVATE KEY-----"
+    code = f"const k = 'sk-ant-api03-abcdefghijklmnopqrstuvwx';\nconst pem = `{key}`;\nsend(k);\n"
+    judge = OncePerRun(Inner())
+    judge.ask(Question(text="q", code=code, lang="typescript", header="const t = 'ghp_" + "a" * 36 + "';"))
+    (q,) = seen
+    assert "sk-ant" not in q.prompt() and "MIIE" not in q.prompt() and "ghp_" not in q.prompt()
+    assert q.code.count("\n") == code.count("\n") and q.code.splitlines()[-1] == "send(k);"
+    assert judge.masked == {"api-key": 1, "private-key": 1, "github-token": 1}
+    judge.ask(Question(text="q", code="send(1);", lang="typescript"))
+    assert seen[-1].code == "send(1);" and judge.masked["api-key"] == 1
+
+
 # ── 프롬프트 · 알림 ─────────────────────────────────────────────────────────
 
 

@@ -347,6 +347,14 @@
         "judge_usage": {
           "$ref": "#/$defs/usage"
         },
+        "judge_masked": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "판정자(--judge)에게 보내기 전에 가린 비밀값 수(종류별). 가린 것이 있을 때만 있다"
+        },
         "agent": {
           "$ref": "#/$defs/agent"
         }

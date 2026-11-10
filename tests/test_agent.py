@@ -128,6 +128,29 @@ def test_mask_leaves_evidence_alone(text):
     assert mask(text) == (text, {})
 
 
+def test_masking_keeps_the_line_count():
+    key = "-----BEGIN RSA PRIVATE KEY-----\nMIIE\nabcd\n-----END RSA PRIVATE KEY-----\nnext()"
+    out, counts = mask(key)
+    assert counts == {"private-key": 1} and out.count("\n") == key.count("\n") and out.endswith("next()")
+
+
+def test_tools_mask_the_whole_file_before_cutting(tmp_path):
+    """읽는 구간만 가리면 개인키 블록의 중간부터 읽을 때 본문이 그대로 나갔다. 검색 결과에 BEGIN 줄이 있으면 그 뒤의
+    검색 결과가 모두 지워졌다."""
+    (tmp_path / "keys.ts").write_text(
+        "export const pem = `\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n"
+        "-----END PRIVATE KEY-----`;\nexport const other = 1;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "z.ts").write_text("export const target = 2;\n", encoding="utf-8")
+    t = RepoTools(tmp_path)
+    out = t.call("read_file", {"path": "keys.ts", "start_line": 3})
+    assert "MIIE" not in out and "5\texport const other = 1;" in out
+    hits = t.search("export|BEGIN")
+    assert "MIIE" not in hits and "z.ts:1: export const target = 2;" in hits and "keys.ts:5:" in hits
+    assert t.masked == {"private-key": 1}  # 중간부터 읽은 구간에는 가린 자리 표시도 본문도 없다
+
+
 def test_secret_files():
     assert is_secret_file(".env") and is_secret_file("apps/web/.env.local") and is_secret_file("certs/server.pem")
     assert not is_secret_file(".env.example") and not is_secret_file("src/env.ts") and not is_secret_file("key.ts")
