@@ -29,14 +29,15 @@
 
 | 모듈 | 하는 일 | 줄 수 |
 |---|---|---|
-| `cli.py` | `scan`(경로·`--staged`·`--diff`, `--judge`, `--agent`), `validate`, `test`, `doctor`, `schema` | 772 |
+| `cli.py` | `scan`(경로·`--staged`·`--diff`, `--judge`, `--agent`), `validate`, `test`, `doctor`, `schema`, `hook` | 850 |
 | `evaluate/` | 세 값 판정, 함수 단위 판정, AI 질문 고르기, 에이전트 결과 반영(`agent_pass.py`) | 1,456 |
 | `static/` | 팩을 Semgrep 설정 하나로 컴파일, 격리 실행, 결과 해석, `StaticBackend` | 1,106 |
 | `judge/` | `claude-cli:`·`anthropic:` 어댑터, 표준 라이브러리 HTTP, 에이전트형 판정기(`agent.py`) | 1,146 |
 | `evidence.py` | 인용 관문 | 146 |
 | `egress.py` | 외부로 보내기 전 비밀값 가리기, 비밀 파일 판별 | 92 |
 | `index/` | 저장소 색인: 파일 역할, import 관계, 후보 단위 | 427 |
-| `report/` | 글·JSON·SARIF, 안정 지문, 팩 시험 보고 | 1,033 |
+| `report/` | 글·JSON·SARIF·GitLab Code Quality, 안정 지문, 팩 시험 보고 | 1,110 |
+| `integrations/` | Claude Code PostToolUse 훅(고친 파일 하나를 정적 조건으로 검사) | 88 |
 | `pack/`, `model.py` | 팩 문법 v0.4(정책 → 의무 id, `_duties.jsonl`) | 640 |
 | `discover.py`, `gitscope.py` | 검사 대상 고르기 | 429 |
 | `packtest.py` | 팩 픽스처 시험(`--strict`) | 556 |
@@ -54,7 +55,7 @@
 | PII→외부 AI 정책(개인정보 보호법 제28조의8·제26조) | `policies/kr-core/` | 끝(11/7). `kr.pipa.28-8`, 픽스처 33개 |
 | AI 실패 시 정적 결과 유지 시험 | `tests/`, `judge/` | 끝(11/7). 끊기면 두 질문 뒤 멈춤, 독립 검토는 1로 끝남 |
 | 운영 지표 뽑기(관문 거절률, 가린 수, 비용) | `scripts/metrics.py` | 끝(11/7) |
-| Claude Code 훅, GitLab Code Quality 출력 | `integrations/`, `report/` | 13주 |
+| Claude Code 훅, GitLab Code Quality 출력 | `integrations/`, `report/codequality.py`, `examples/` | 끝(11/10). GitLab 작업 정의는 러너에서 돌려 보지 않았다 |
 
 ## 만들며 알게 된 것 (11/3 dev 저장소 20곳, 원자료 `~/.cache/policypack-eval/agent-dev-2026-11-03/`)
 

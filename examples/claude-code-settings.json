@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "policypack hook claude-code",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

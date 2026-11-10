@@ -1,6 +1,7 @@
 # 출력 계약 — scan 의 JSON 보고서
 
-웹 서비스(`Plitsoft-SDP-Web`)와 CI 가 읽는 `policypack scan --output-format json` 의 약속이다.
+웹 서비스(`Plitsoft-SDP-Web`)와 CI 가 읽는 `policypack scan --output-format json` 의 약속이다. SARIF·GitLab Code
+Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문은 셋이 같은 값이다.
 스키마는 [`schemas/report-1.json`](../schemas/report-1.json)(JSON Schema 2020-12)이고, `tests/test_report_schema.py` 가
 실제 보고서(판정자 없음, 판정자가 푼 것·뺀 것, 에이전트 세 방식, 서비스에 닿지 못한 에이전트)로 검사한다.
 

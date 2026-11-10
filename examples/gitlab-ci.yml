@@ -1,0 +1,25 @@
+# GitLab CI 에서 머지 요청이 바꾼 JS/TS 파일을 검사하고, 결과를 Code Quality 위젯과 변경 줄 옆에 보인다.
+# .gitlab-ci.yml 에 붙여 넣고 <이 저장소 URL>·<태그> 를 채운다. 정적 조건만 쓴다(AI 호출 0회, 코드가 밖으로 나가지 않음).
+policypack:
+  stage: test
+  image: python:3.12-slim          # glibc 2.36. semgrep 엔진은 glibc 2.34 이상이 필요하다(Alpine 이면 musl 1.2)
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: 0                   # --diff 가 대상 가지와의 분기점(merge-base)을 찾는다
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates >/dev/null
+    - pip install -q uv
+    # PyPI 에 올리기 전에는 이름만으로 설치하지 않는다. 아직 등록되지 않은 이름을 남이 먼저 등록할 수 있다
+    - uv tool install -q "git+<이 저장소 URL>@<태그>"
+    - export PATH="$HOME/.local/bin:$PATH"
+  script:
+    - git fetch -q origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - policypack scan --diff "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --output-format gitlab > gl-code-quality-report.json
+  # 1 = 사람이 볼 것이 있음(경고). 2 = 도구 오류라 파이프라인을 멈춘다
+  allow_failure:
+    exit_codes: [1]
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json

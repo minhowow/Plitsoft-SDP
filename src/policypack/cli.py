@@ -119,13 +119,22 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="에이전트 단계 전체의 시간 상한. 넘으면 남은 질문은 보내지 않고 정적 판정을 그대로 둔다",
     )
-    sc.add_argument("--output-format", default="full", choices=["full", "concise", "json", "sarif"])
+    sc.add_argument(
+        "--output-format",
+        default="full",
+        choices=["full", "concise", "json", "sarif", "gitlab"],
+        help="gitlab: GitLab Code Quality 보고서(artifacts:reports:codequality)",
+    )
     sc.add_argument(
         "--fail-on", default="uncertain", choices=["review", "uncertain", "never"], help="무엇까지를 종료 코드 1로 볼지"
     )
     sc.add_argument("--exit-zero", action="store_true", help="검토할 것이 있어도 0으로 끝낸다")
     sc.add_argument("--explain", action="store_true", help="판정 경로를 함께 낸다 (full 은 늘 낸다)")
     sc.add_argument("--no-color", action="store_true")
+
+    h = sub.add_parser("hook", help="편집기·에이전트의 훅에서 부른다(입력은 stdin 의 JSON)")
+    h.add_argument("host", choices=["claude-code"], help="claude-code: PostToolUse 훅(Edit·Write 뒤에 그 파일을 검사)")
+    h.add_argument("--config", default=None, help="정책 팩 경로 (기본: 내장 kr-core 팩)")
 
     t = sub.add_parser("test", help="정책 팩의 픽스처로 기대 판정을 확인한다 (모델 호출 0회)")
     t.add_argument("paths", nargs="*", help="팩 디렉터리·tests·*.test.yaml 경로 (기본: 내장 팩의 tests)")
@@ -573,7 +582,7 @@ def cmd_scan(args) -> int:
 
     if not found.files:
         print("검사할 파일이 없습니다.", file=sys.stderr)
-        if args.output_format in ("json", "sarif"):
+        if args.output_format in ("json", "sarif", "gitlab"):
             # CI 가 SARIF 를 올리는 단계는 빈 stdout 을 받으면 실패한다. 빈 보고서를 낸다.
             empty = EvalResult(
                 judge_id=getattr(judge, "id", "") if judge else "",
@@ -704,9 +713,11 @@ def _exit_code(args, findings, found: Discovery) -> int:
 
 
 def _emit(args, result, pack, base, root, digest, n_files: int) -> None:
-    from policypack.report import json_out, sarif, text
+    from policypack.report import codequality, json_out, sarif, text
 
-    if args.output_format == "json":
+    if args.output_format == "gitlab":
+        print(codequality.dumps(result, root, digest))
+    elif args.output_format == "json":
         print(json_out.dumps(result, root, digest, {"files": n_files}))
     elif args.output_format == "sarif":
         print(sarif.dumps(result, pack, base, root, digest))
@@ -771,12 +782,22 @@ def cmd_test(args) -> int:
     return EXIT_FINDINGS if run.failed or (args.strict and (run.gaps or run.unused_stubs)) else EXIT_OK
 
 
+# ── hook ────────────────────────────────────────────────────────────────────
+
+
+def cmd_hook(args) -> int:
+    from policypack.integrations import claude_code
+
+    return claude_code.run(sys.stdin.read(), args.config, lambda argv: _main(argv))
+
+
 COMMANDS = {
     "scan": cmd_scan,
     "validate": cmd_validate,
     "schema": cmd_schema,
     "doctor": cmd_doctor,
     "test": cmd_test,
+    "hook": cmd_hook,
 }
 
 

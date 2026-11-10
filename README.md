@@ -123,6 +123,20 @@ GitHub Actions 의 호스티드 러너에는 Python 과 pipx 가 이미 있다. 
 - run: policypack scan --diff origin/main --output-format sarif > policypack.sarif
 ```
 
+GitLab 은 `--output-format gitlab` 으로 Code Quality 보고서를 내면 머지 요청의 위젯과 바뀐 줄 옆에 경고가 뜬다.
+붙여 넣을 작업 정의는 [`examples/gitlab-ci.yml`](examples/gitlab-ci.yml) 이다. 종료 코드 1(경고)은 `allow_failure`
+로 넘기고 2(도구 오류)에서만 멈춘다. 지문은 SARIF 의 `partialFingerprints` 와 같은 값이다.
+
+**Claude Code 훅.** Claude Code 가 JS/TS 파일을 고칠 때마다 그 파일을 검사하고, 확실한 '검토 필요'가 있으면
+경고와 개발자에게 할 질문을 Claude 에게 돌려준다. Claude 는 고칠 수 있는 것은 고치고, 사업상 판단이 필요한 것은
+사용자에게 묻는다. [`examples/claude-code-settings.json`](examples/claude-code-settings.json) 을 프로젝트의
+`.claude/settings.json` 에 합친다(`policypack` 이 PATH 에 있어야 한다).
+
+- 정적 조건만 쓴다. AI 를 부르지 않고 아무것도 밖으로 보내지 않는다. 한 파일에 1~2초다.
+- '불확실'만 있으면 알리지 않는다. 판정자 없이는 AI 에게 물을 곳이 모두 '불확실'이라 편집마다 끼어든다.
+- 생성물(node_modules·dist·축소 번들)과 JS/TS 가 아닌 파일은 보지 않는다. 검사하지 못하면 사용자에게만 알리고
+  편집을 이어 간다.
+
 ## 써 보기
 
 ```bash
@@ -339,6 +353,7 @@ Opengrep(Semgrep CE 의 LGPL-2.1 포크)으로 갈아탈 수도 있다. 라이�
 | `policies/kr-core/` | 내장 정책 팩, 조문 원문(`_legal/`), 픽스처(`tests/`) |
 | `schemas/` | 정책 팩·테스트 파일의 JSON Schema (`policypack schema --write` 가 만든다)와 scan 보고서의 스키마(`report-1.json`, 손으로 쓴다. [docs/output.md](docs/output.md)) |
 | `tests/` | pytest |
+| `examples/` | GitLab CI 작업 정의, Claude Code 훅 설정 |
 | `scripts/` | 보고서에서 운영 지표(인용 관문 거절, 가린 비밀값, 비용)를 모으는 `metrics.py` |
 | `docs/` | 방향, 구조, 일정, 결정 기록, 국내 법 의무 지도, 보고서 위치 ([docs/README.md](docs/README.md)) |
 

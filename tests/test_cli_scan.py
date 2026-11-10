@@ -125,13 +125,13 @@ def test_json_report_tells_cleared_units_from_units_that_never_applied(capsys):
         assert c["alternatives"] and all(a["lines"] for a in c["alternatives"])
 
 
-@pytest.mark.parametrize("fmt", ["json", "sarif", "concise", "full"])
+@pytest.mark.parametrize("fmt", ["json", "sarif", "gitlab", "concise", "full"])
 def test_reports_without_a_judge_carry_none_of_the_scanned_code(fmt, capsys):
     """판정자 없이 낸 보고서에는 검사한 코드가 없다. 코드에서 나가는 것은 경로, 줄 번호, 둘레 줄의 해시(지문)다."""
     folder = REPO / "policies/kr-core/tests/pipa-22-2"
     run(str(folder), "--output-format", fmt, "--no-color")
     out = capsys.readouterr().out
-    if fmt in ("json", "sarif"):
+    if fmt in ("json", "sarif", "gitlab"):
         # JSON 은 따옴표와 역슬래시를 이스케이프한다. 풀어서 견줘야 따옴표가 든 코드 줄이 새는 것을 본다
         def strings(node):
             if isinstance(node, str):

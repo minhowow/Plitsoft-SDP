@@ -37,6 +37,9 @@
   1로 끝냄. 운영 지표 스크립트 `scripts/metrics.py`. 11/3 dev 실행(결합, haiku 만, 20곳)에 돌리면 인용 110개 중 관문
   거절 3개, 가린 비밀값 17개(google-key 5, secret-value 12), 읽은 파일 199개, 모델 호출 574회, 어림 $3.41
   (`~/.cache/policypack-eval/agent-dev-2026-11-03/M4c2-haiku/`).
+- 11/10: 웹 인계 판을 원격에 올림(가지 `interim-report-f1-evaluation`, 태그 `handoff-w11`).
+- 13주 앞당김(11/10): Claude Code 훅(`policypack hook claude-code`), GitLab Code Quality 출력(`--output-format gitlab`)과
+  작업 정의(`examples/`). 남은 것은 훅 시연 녹화, GitLab 에서 실제로 돌려 보기, 도구 판 태그.
 
 ## 매주
 
