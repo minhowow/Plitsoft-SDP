@@ -4,6 +4,11 @@
 스키마는 [`schemas/report-1.json`](../schemas/report-1.json)(JSON Schema 2020-12)이고, `tests/test_report_schema.py` 가
 실제 보고서(판정자 없음, 판정자가 푼 것·뺀 것, 에이전트 세 방식, 서비스에 닿지 못한 에이전트)로 검사한다.
 
+## 웹이 고정할 판
+
+- 11주 인계: 태그 `handoff-w11`(원격 `origin` 의 가지 `interim-report-f1-evaluation`). 이 문서와 스키마가 그 판의 계약이다.
+- 13주에 도구 판 태그(`v0.4.0`)를 따로 단다. 그 전까지 웹은 `handoff-w11` 을 고정한다.
+
 ## 판 올리기
 
 - `schema_version` 은 지금 1 이다. 있던 키가 없어지거나 뜻이 바뀌면 올린다. 키를 더할 때는 올리지 않는다.
