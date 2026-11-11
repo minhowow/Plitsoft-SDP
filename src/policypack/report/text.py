@@ -18,6 +18,7 @@ from pathlib import Path
 
 from policypack.discover import SKIPPED_REASONS
 from policypack.evaluate.engine import EvalResult
+from policypack.index.roles import SERVICE, file_role
 from policypack.report.outcome import Finding, Outcome
 from policypack.report.paths import rel
 
@@ -38,6 +39,9 @@ UNTESTED_WHY = {
     "timeout": "판정자가 시간 안에 답하지 않았습니다",
 }
 
+
+# 서비스 코드 밖으로 세는 역할(index/roles.py). 그 파일의 발견은 따로 묶어 뒤에 낸다
+ROLE_LABEL = {"test": "시험·픽스처", "config": "설정"}
 
 AGENT_VERDICT = {"compliant": "충족", "not-compliant": "미충족", "not-applicable": "해당 없음", "unknown": "모름"}
 
@@ -82,20 +86,36 @@ def render(result: EvalResult, root: Path | None = None, explain: bool = False, 
         key=lambda f: (order.get(f.outcome, 9), f.file, f.line or 0, f.policy),
     )
 
-    for f in findings:
+    # 시험·픽스처·설정 파일의 발견은 뒤에 따로 묶는다. 판정과 종료 코드는 그대로다
+    roles = [file_role(rel(f.file, root), f.file) for f in findings]
+    aside = [(f, r) for f, r in zip(findings, roles, strict=True) if r not in SERVICE]
+
+    def emit(f: Finding, tag: str = "") -> None:
         out.append("")
-        out.append(_head(f, st, root))
+        out.append(_head(f, st, root) + (st.dim(f"  [{tag}]") if tag else ""))
         out.extend(_body(f, st))
         if explain:
             out.append(st.dim("  판정 경로"))
             out.extend(st.dim(f"    {line}") for line in f.trace)
+
+    for f, r in zip(findings, roles, strict=True):
+        if r in SERVICE:
+            emit(f)
+    if aside:
+        out.append("")
+        out.append(
+            st.bold(f"시험·픽스처·설정 파일의 발견 {len(aside)}건")
+            + st.dim("  서비스 코드 밖일 수 있어 따로 묶었습니다. 판정은 같습니다")
+        )
+        for f, r in aside:
+            emit(f, ROLE_LABEL.get(r.value, r.value))
 
     if explain:
         out.extend(_ai_decisions(result, st, root))
         out.extend(_agent_cleared(result, st))
 
     out.append("")
-    out.append(_summary(result, findings, st, root))
+    out.append(_summary(result, findings, st, root, aside=len(aside)))
     return "\n".join(out)
 
 
@@ -238,7 +258,7 @@ def _unit_key(u) -> tuple:
     return (u.policy.id, u.rule.id, str(u.target.path.resolve()), region, u.top_level)
 
 
-def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path | None = None) -> str:
+def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path | None = None, aside: int = 0) -> str:
     counts: dict[Outcome, int] = {}
     for f in findings:
         counts[f.outcome] = counts.get(f.outcome, 0) + 1
@@ -264,6 +284,8 @@ def _summary(result: EvalResult, findings: list[Finding], st: Style, root: Path 
 
     body = f"{st.bold('요약')}  {' · '.join(parts)}  ({cost})"
     gaps = []
+    if aside:
+        gaps.append(f"  그 가운데 시험·픽스처·설정 파일의 발견 {aside}건 — 위에 따로 묶었습니다")
     if result.ai_pending:
         gaps.append("  " + pending_note(result, hint=True))
     if result.ai_cleared:

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from pathlib import Path
 
 
 class Role(str, Enum):
@@ -22,6 +23,10 @@ class Role(str, Enum):
     SERVER = "server"
     SCREEN = "screen"
     OTHER = "other"
+
+
+SERVICE = frozenset({Role.SERVER, Role.SCREEN, Role.OTHER})
+"""보고서가 서비스 코드로 세는 역할. test(시험·픽스처·목업·스토리)와 config(설정)는 그 밖으로 센다."""
 
 
 _TEST_PATH = re.compile(
@@ -67,3 +72,14 @@ def classify(rel: str, text: str) -> Role:
     if _SCREEN_PATH.search(rel) and rel.endswith((".jsx", ".tsx", ".vue", ".svelte")):
         return Role.SCREEN
     return Role.OTHER
+
+
+def file_role(rel: str, path: str | Path, limit: int = 400_000) -> Role:
+    """보고서에 싣는 파일 하나의 역할. `rel` 은 보고서와 같은 검사 루트 기준 경로다(절대 경로면 저장소 바깥 폴더
+    이름 `tests/` 까지 읽힌다). 내용은 색인(graph.READ_BYTES)과 같은 만큼만 읽는다. 읽지 못하면 경로로만 고른다."""
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read(limit).decode("utf-8", errors="replace")
+    except OSError:
+        text = ""
+    return classify(rel, text)

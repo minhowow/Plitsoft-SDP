@@ -340,6 +340,41 @@
         "coverage_complete": {
           "type": "boolean"
         },
+        "finding_counts": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "service": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "non_service": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "by_role": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/role"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "required": [
+            "total",
+            "service",
+            "non_service",
+            "by_role"
+          ],
+          "additionalProperties": false,
+          "description": "findings 를 파일 역할로 나눈 수. service 는 server·screen·other, non_service 는 test·config. 판정과 종료 코드는 역할을 보지 않는다"
+        },
         "files": {
           "type": "integer",
           "minimum": 0
@@ -383,6 +418,16 @@
       ],
       "additionalProperties": false
     },
+    "role": {
+      "enum": [
+        "test",
+        "config",
+        "server",
+        "screen",
+        "other"
+      ],
+      "description": "파일 역할(index/roles.py). test 는 시험·픽스처·목업·스토리(경로로만 고른다), config 는 설정 파일. 경로와 내용의 모양으로 고른 힌트다"
+    },
     "finding": {
       "type": "object",
       "properties": {
@@ -409,6 +454,9 @@
               "type": "null"
             }
           ]
+        },
+        "role": {
+          "$ref": "#/$defs/role"
         },
         "case": {
           "type": [

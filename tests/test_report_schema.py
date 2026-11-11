@@ -123,3 +123,25 @@ def test_agent_reports_match(tmp_path, monkeypatch, capsys, mode):
     else:
         assert any(c.get("line_model") == 99 for r in agent["records"] for c in r["citations"])
     check(doc)
+
+
+def test_findings_carry_the_file_role(tmp_path, monkeypatch, capsys):
+    """시험 파일의 발견도 그대로 내되 역할을 싣고, 글 출력은 그 발견을 뒤에 따로 묶는다(웹 시연, 11/11)."""
+    from policypack.cli import main
+
+    monkeypatch.chdir(tmp_path)  # git 저장소가 아니면 실행 위치가 검사 루트다
+    for name in ("src/signup.ts", "tests/signup.test.ts"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(FIX / "pipa-22-2" / "violating.ts", tmp_path / name)
+    assert main(["scan", str(tmp_path), "--output-format", "json"]) == 1
+    doc = json.loads(capsys.readouterr().out)
+    check(doc)
+    assert {f["file"]: f["role"] for f in doc["findings"]} == {"src/signup.ts": "other", "tests/signup.test.ts": "test"}
+    counts = {"total": 2, "service": 1, "non_service": 1, "by_role": {"other": 1, "test": 1}}
+    assert doc["run"]["finding_counts"] == counts
+
+    assert main(["scan", str(tmp_path), "--no-color"]) == 1
+    out = capsys.readouterr().out
+    aside = out.index("시험·픽스처·설정 파일의 발견 1건")
+    assert out.index("src/signup.ts") < aside < out.index("tests/signup.test.ts")
+    assert "그 가운데 시험·픽스처·설정 파일의 발견 1건" in out

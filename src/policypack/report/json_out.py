@@ -8,10 +8,12 @@ AI 해제 기록)을 properties 에 밀어 넣어야 한다. 이쪽은 그런 �
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from policypack import __version__
 from policypack.evaluate.engine import EvalResult
+from policypack.index.roles import SERVICE, file_role
 from policypack.report.fingerprint import VERSION as FP_VERSION
 from policypack.report.fingerprint import fingerprints
 from policypack.report.paths import rel
@@ -22,6 +24,8 @@ SCHEMA_VERSION = 1
 
 def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", meta: dict | None = None) -> dict:
     fps = fingerprints(result.findings, pack_digest, root)
+    roles = [file_role(_rel(f.file, root), f.file) for f in result.findings]
+    service = sum(r in SERVICE for r in roles)
     return {
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": "policypack", "version": __version__},
@@ -54,6 +58,14 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
             "incomplete": [_rel(p, root) for p in result.incomplete],
             "engine_errors": list(result.engine_errors),
             "coverage_complete": result.coverage_complete,
+            # 발견을 파일 역할로 나눈 수. 서비스 코드는 server·screen·other, 그 밖은 test(시험·픽스처·목업·스토리)와
+            # config. 역할은 경로와 내용의 모양으로 고른 힌트라 판정과 종료 코드는 이것을 보지 않는다
+            "finding_counts": {
+                "total": len(roles),
+                "service": service,
+                "non_service": len(roles) - service,
+                "by_role": dict(sorted(Counter(r.value for r in roles).items())),
+            },
             # 에이전트 검토 단계를 돌렸을 때만 싣는다(--agent). 판정기, 후보 단위, 인용 관문 결과, 사용량
             **({"judge_usage": result.judge_usage} if result.judge_usage else {}),
             # 판정자에게 보내기 전에 가린 비밀값 수(종류별). 가린 것이 있을 때만
@@ -68,6 +80,7 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
                 "outcome": f.outcome.value,
                 "file": _rel(f.file, root),
                 "line": f.line,
+                "role": role.value,
                 "case": f.case,
                 "category": f.category,
                 "title": f.title,
@@ -84,7 +97,7 @@ def build(result: EvalResult, root: Path | None = None, pack_digest: str = "", m
                 "decision_path": f.trace,
                 **({"agent": f.agent} if f.agent is not None else {}),
             }
-            for f, fp in zip(result.findings, fps, strict=True)
+            for f, fp, role in zip(result.findings, fps, roles, strict=True)
         ],
     }
 

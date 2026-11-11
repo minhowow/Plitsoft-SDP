@@ -8,7 +8,9 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 ## 웹이 고정할 판
 
 - 11주 인계: 태그 `handoff-w11`(원격 `origin` 의 가지 `interim-report-f1-evaluation`). 이 문서와 스키마가 그 판의 계약이다.
-- 13주에 도구 판 태그(`v0.4.0`)를 따로 단다. 그 전까지 웹은 `handoff-w11` 을 고정한다.
+- 11주 두 번째 인계(11/11): 태그 `handoff-w11-2`(가지 `main`). 발견마다 파일 역할을 싣고(아래), 배열·라우터의 `push`
+  를 광고 발송으로 세지 않는다. `handoff-w11` 에 키를 더하기만 했다.
+- 13주에 도구 판 태그(`v0.4.0`)를 따로 단다. 그 전까지 웹은 `handoff-w11-2` 를 고정한다.
 
 ## 판 올리기
 
@@ -16,6 +18,18 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 - 그래서 받는 쪽은 **모르는 키를 무시**한다. 스키마는 이 CLI 판이 내는 키를 모두 적고 그 밖의 키를 막는데, 그것은
   CLI 의 시험이 스키마를 함께 고치게 하려는 것이다. 웹이 이 스키마로 엄격하게 검사하면 CLI 가 키를 더할 때 깨진다.
 - 파일 경로는 모두 검사 루트(git 저장소면 그 뿌리)에서의 상대 경로다.
+
+## 파일 역할의 키 (`handoff-w11-2` 부터)
+
+| 키 | 뜻 |
+|---|---|
+| `findings[].role` | 그 파일의 역할. `test`(시험·픽스처·목업·스토리, 경로로만 고른다), `config`(설정), `server`, `screen`, `other` |
+| `run.finding_counts` | `total`, `service`(server·screen·other 의 발견), `non_service`(test·config 의 발견), `by_role`(역할마다 수) |
+
+- 역할은 `index/roles.py` 가 경로와 내용의 모양으로 고른 힌트다. 판정, `findings` 의 목록, 종료 코드는 역할을 보지 않는다.
+  시험 파일의 발견도 그대로 `findings` 에 있다. 웹은 `role` 로 나눠 보이면 된다.
+- 글 출력(`full`·`concise`)은 test·config 파일의 발견을 뒤에 따로 묶고 요약에 그 수를 적는다.
+- 이 키가 없는 보고서(`handoff-w11` 판, 11/11 의 사례 실행 결과)는 역할을 모르는 것으로 읽는다.
 
 ## 판정자(`--judge`)의 키
 
