@@ -136,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("host", choices=["claude-code"], help="claude-code: PostToolUse 훅(Edit·Write 뒤에 그 파일을 검사)")
     h.add_argument("--config", default=None, help="정책 팩 경로 (기본: 내장 kr-core 팩)")
 
+    pr = sub.add_parser(
+        "profile", help="저장소가 하는 일(기능)과 그 기능에 걸릴 수 있는 의무를 JSON 으로 낸다 (모델 호출 0회)"
+    )
+    pr.add_argument("path", help="저장소 폴더")
+
     t = sub.add_parser("test", help="정책 팩의 픽스처로 기대 판정을 확인한다 (모델 호출 0회)")
     t.add_argument("paths", nargs="*", help="팩 디렉터리·tests·*.test.yaml 경로 (기본: 내장 팩의 tests)")
     t.add_argument("--config", default=None, help="정책 팩 경로 (기본: 경로 안의 팩, 없으면 내장 kr-core)")
@@ -793,8 +798,19 @@ def cmd_hook(args) -> int:
     return claude_code.run(sys.stdin.read(), args.config, lambda argv: _main(argv))
 
 
+def cmd_profile(args) -> int:
+    from policypack.profile import profile
+
+    root = Path(args.path)
+    if not root.is_dir():
+        raise ConfigError(f"폴더가 아닙니다: {args.path}")
+    print(json.dumps(profile(root.resolve()), ensure_ascii=False, indent=2))
+    return EXIT_OK
+
+
 COMMANDS = {
     "scan": cmd_scan,
+    "profile": cmd_profile,
     "validate": cmd_validate,
     "schema": cmd_schema,
     "doctor": cmd_doctor,

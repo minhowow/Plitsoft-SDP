@@ -1,0 +1,308 @@
+# 프로필이 알아보는 서비스 기능과, 의무 지도의 의무를 기능에 붙이는 규칙.
+#
+# signals — 코드에서 기능을 알아보는 신호. 모두 설명할 수 있는 것만 쓴다(글자 맞추기 정규식을 쓰지 않는다).
+#   packages  package.json 의 dependencies(devDependencies 는 빼고)와 소스의 import·require 에 나온 npm 이름.
+#             '/' 로 끝나면 그 범위(@tosspayments/ 등)의 모든 꾸러미다
+#   paths     경로(폴더·파일 이름)를 낱말로 나눈 것 가운데 하나, 또는 붙은 두 낱말을 이은 것
+#             (SignUpScreen.tsx → sign·up·screen, signup). 낱말이 같아야 맞는다(border 는 order 가 아니다).
+#             뜻이 갈리는 낱말은 쓰지 않는다: map(RoadMap·MindMap), chat(AI 챗봇), job(배치 작업), message(오류 문구),
+#             post(HTTP POST), review(코드 검토), ticket(표 모양 화면), video(화상 통화), doctor(점검 명령),
+#             prompt(확인 대화상자)
+#   calls     소스에 글자 그대로 있는 호출·주소 모양(앞뒤가 식별자 글자가 아닐 때). 주석 줄은 보지 않는다
+#   screens   화면 파일(JSX·TSX 를 그리는 파일, index/roles.py 의 screen)이 하나라도 있으면 맞는다
+# 시험·픽스처·설정 파일(index/roles.py 의 test·config)의 신호는 기능으로 세지 않고 따로 낸다.
+#
+# 의무 붙이기 — 의무 지도의 의무(코드에 흔적이 남는 795개)마다 하나의 기능 또는 아래 두 묶음 가운데 하나에 붙는다.
+#   scope 가 sector 인 의무는 모두 '지위'(공공기관·금융회사 등 주체의 지위로 걸리는 의무)다
+#   그 밖은 duties(의무 id)가 먼저, 다음이 scope_notes(의무 지도의 scope_note) 다
+# 표는 scripts/lawmap_table.py 가 만든다(src/policypack/profile/duties.jsonl).
+
+common:
+  name: 거의 모든 서비스
+  scope_notes: [클라우드·SaaS, 수탁 SaaS]
+  duties:
+    - netact-48-2                 # 악성프로그램 전달·유포 금지
+    - secguide-annex1-2-2-10      # 로그 보관
+    - pipa-29-1                   # 안전조치 의무(총칙)
+    - pipa-30-1                   # 처리방침 수립
+    - pipa-30-2                   # 처리방침 게재
+    - pipa-34-2-1                 # 고유식별·계좌·카드정보 공중 노출 금지
+    - pipa-stdguide-20-1          # 처리방침 이름·게재 방법
+    - pipa-stdguide-21-1          # 처리방침 변경 공개
+    - safety-std-6-3              # 홈페이지·공유설정으로 공개·유출 금지
+    - safety-std-7-4              # 전송 구간 암호화
+    - safety-std-7-6              # 암호 키 관리
+    - commsecret-decree-41-2      # 통신사실확인자료 보관
+
+status:
+  name: 지위에 따라 걸리는 의무
+
+features:
+  - id: signup
+    name: 회원 가입·개인정보 수집
+    signals:
+      paths: [signup, register, registration, join, onboarding]
+      calls: [createUserWithEmailAndPassword, auth.signUp]
+    scope_notes: [아동 가입, 민감정보, 장애정보 수집]
+    duties:
+      - pipa-15-1
+      - pipa-15-2
+      - pipa-16-1
+      - pipa-16-2
+      - pipa-16-3
+      - pipa-22-1
+      - pipa-22-1-h7
+      - pipa-22-2
+      - pipa-22-3
+      - pipa-22-5
+      - pipa-22-2-1
+      - pipa-22-2-3
+      - pipa-decree-17-2
+      - pipa-59-1-h1
+      - tcra-3-2
+
+  - id: account
+    name: 회원 탈퇴·내 정보 관리
+    signals:
+      paths: [withdraw, withdrawal, secession, unregister, mypage, myinfo, deleteaccount]
+    duties:
+      - pipa-21-1
+      - pipa-21-2
+      - pipa-21-3
+      - pipa-35-3
+      - pipa-36-2
+      - pipa-36-3
+      - pipa-37-2
+      - pipa-37-3
+      - pipa-37-4
+      - pipa-38-4
+      - pipa-38-5
+      - pipa-decree-46-1
+      - pipa-stdguide-10-1
+      - pipa-stdguide-10-3
+      - safety-std-13-2
+
+  - id: auth
+    name: 로그인·본인인증
+    signals:
+      packages: [next-auth, "@auth/", passport, jsonwebtoken, bcrypt, bcryptjs, argon2, express-session, iron-session,
+                 "@clerk/", "@react-oauth/google", react-kakao-login, "@react-native-seoul/kakao-login",
+                 "@react-native-seoul/naver-login", "@portone/browser-sdk", iamport-react-native]
+      paths: [login, signin, logout, oauth, auth, password]
+      calls: [signInWithEmailAndPassword, signInWithPopup, auth.signInWithPassword, IMP.certification]
+    scope_notes: [본인인증, 주민번호, 고유식별정보, 주민번호 생성, 주민번호 처리, 전자서명, 인증서 연동, 행정 전자제출]
+    duties:
+      - netact-23-2-1
+      - netact-48-4
+      - netact-49-2-1
+      - secguide-annex1-2-2-13
+      - pipa-19-1
+      - safety-std-5-5
+      - safety-std-5-6
+      - safety-std-7-1
+      - safety-std-7-2
+
+  - id: admin
+    name: 관리자 화면
+    signals:
+      paths: [admin, backoffice]
+    duties:
+      - secguide-annex1-2-2-8
+      - safety-std-5-1
+      - safety-std-5-3
+      - safety-std-5-4
+      - safety-std-6-1
+      - safety-std-6-2
+      - safety-std-6-4
+      - safety-std-7-5
+      - safety-std-8-1
+      - safety-std-8-3
+      - safety-std-12-1
+
+  - id: payment
+    name: 결제
+    signals:
+      packages: ["@tosspayments/", "@portone/", iamport-react-native, stripe, "@stripe/", "@paypal/",
+                 react-native-iamport, "@bootpay/", bootpay-js]
+      paths: [payment, payments, checkout, billing, pay]
+      calls: [IMP.request_pay, loadTossPayments, requestPayment]
+    scope_notes: [전자결제, 카드 가맹점, 결제 가맹점, 휴대폰 결제, 자동이체, 선불 충전, 선불·포인트, 적립금, 유료 결제, 구독 결제]
+    duties: [tcra-3-3]
+
+  - id: commerce
+    name: 상품 판매(통신판매)
+    signals:
+      paths: [cart, order, orders, product, products, goods, shop, shopping]
+    scope_notes: [통신판매, 계속거래, 할부 판매, 구독 서비스, 방문판매, 전자거래, B2B 거래, 고시 업종, 에스크로 표지,
+                  표준약관 표지, KC대상 판매, 농식품 판매, 가전·의류 판매, 중고 전기용품, 병행수입 판매, 도서 판매, 전자책 판매,
+                  도서 기관 납품, 주류 판매, 안경·렌즈 판매, 성인 상품]
+    duties: [fla-3-1-h1, fla-3-1-h2, fla-3-1-h3]
+
+  - id: marketplace
+    name: 중개·거래 플랫폼
+    signals:
+      paths: [seller, sellers, marketplace, auction, secondhand]
+    scope_notes: [통신판매중개, 중개·구매대행, C2C 중개, 장터 게시판, 구매대행, 중개·수입대행, 중고 거래 중개, 쇼핑몰 호스팅,
+                  카풀, 렌터카 기사 알선, 중고차 매물]
+
+  - id: location
+    name: 위치 정보
+    signals:
+      packages: [react-kakao-maps-sdk, "@react-google-maps/api", react-naver-maps, leaflet, react-leaflet, mapbox-gl,
+                 expo-location, react-native-maps, "@react-native-community/geolocation", react-native-geolocation-service]
+      paths: [location, geolocation, nearby]
+      calls: [navigator.geolocation, kakao.maps, naver.maps, getCurrentPositionAsync]
+    scope_notes: [위치]
+
+  - id: ad-send
+    name: 광고성 정보 발송(문자·푸시·메일)
+    signals:
+      packages: [solapi, coolsms-node-sdk, nodemailer, "@sendgrid/mail", twilio, firebase-admin, expo-server-sdk,
+                 web-push, onesignal-node, "@onesignal/node-onesignal", node-pushnotifications]
+      paths: [sms, alimtalk, newsletter, marketing, campaign]
+      calls: [sendPushNotificationsAsync, sendMulticast, sendEachForMulticast]
+    scope_notes: [광고 발송, 문자 발송, 발송 플랫폼, 선거 문자 발송, 홍보 위탁]
+
+  - id: advertising
+    name: 광고 게재·후기·인증 표시
+    signals:
+      packages: [react-google-adsense, "@ctrl/react-adsense", react-adsense]
+      paths: [reviews, ads, advertisement, sponsor, sponsored, promotion]
+      calls: [adsbygoogle]
+    scope_notes: [의약품 광고, 의료기기 광고, 성인 광고, 광고 게재, 식품 광고, 추천·보증, 광고 게시, 금융상품 광고, 대부 광고,
+                  의료광고, 영상 광고, 주류 홍보, SW 제품 홍보, 클라우드 홍보, 매물 광고, 후기 게시, 인증 표시, 키오스크 판매]
+
+  - id: genai
+    name: AI 기능(생성형 AI·자동화 결정)
+    signals:
+      packages: [openai, "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai", langchain, "@langchain/", ai,
+                 "@ai-sdk/", replicate, "@huggingface/inference", cohere-ai, ollama, "@mistralai/mistralai", groq-sdk]
+      paths: [ai, chatbot, gpt, llm]
+      calls: [chat.completions.create, responses.create, generateContent, api.openai.com, api.anthropic.com,
+              generativelanguage.googleapis.com]
+    scope_notes: [생성형 AI, 고영향 AI, AI 합성물, AI 가상인물, 아동 챗봇, 자동화 결정, AI 음성·얼굴, 얼굴 합성]
+
+  - id: external-transfer
+    name: 외부 업체·국외로 개인정보 전송(외부 AI 포함)
+    signals:
+      packages: [openai, "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai", "@ai-sdk/", "@sentry/",
+                 mixpanel-browser, "@amplitude/", amplitude-js, posthog-js, "@datadog/", logrocket, "@hotjar/",
+                 "@sendgrid/mail", twilio, "@channel.io/", firebase, "@supabase/supabase-js", "@aws-sdk/", aws-sdk]
+      calls: [api.openai.com, api.anthropic.com, generativelanguage.googleapis.com]
+    scope_notes: [국외이전 동의]
+    duties: [pipa-17-1, pipa-17-2, pipa-stdguide-7-3, pipa-26-2, pipa-28-8-1]
+
+  - id: analytics
+    name: 분석·추적·데이터 활용
+    signals:
+      packages: [react-ga, react-ga4, react-gtm-module, "@next/third-parties", mixpanel-browser, "@amplitude/",
+                 amplitude-js, "@vercel/analytics", posthog-js, "@hotjar/", "@datadog/browser-rum", logrocket,
+                 react-facebook-pixel, "@analytics/"]
+      paths: [analytics, tracking]
+      calls: [gtag, fbq, dataLayer.push]
+    scope_notes: [가명처리, 생기부 분석]
+    duties: [pipa-18-1, pipa-18-3, pipa-decree-14-2-1]
+
+  - id: ugc
+    name: 게시판·이용자 게시물
+    signals:
+      paths: [board, boards, posts, community, comment, comments, article, articles, feed]
+    scope_notes: [게시판, UGC·호스팅, 공개 게시]
+
+  - id: messaging
+    name: 채팅·메시지·통화
+    signals:
+      packages: [sendbird, "@sendbird/", stream-chat, "@twilio/conversations", twilio-video, agora-rtc-sdk-ng, peerjs,
+                 simple-peer, socket.io, socket.io-client]
+      paths: [chatroom, chatting, dm]
+      calls: [RTCPeerConnection]
+    scope_notes: [메시지·통화, 통화·메시지, 문자 중계, 전화 동의]
+    duties: [netact-49-1]
+
+  - id: camera
+    name: 카메라·마이크(촬영·녹음)·CCTV
+    signals:
+      packages: [react-webcam, expo-camera, react-native-vision-camera, react-native-camera, expo-av]
+      paths: [cctv, camera]
+      calls: [getUserMedia, MediaRecorder, "rtsp://"]
+    scope_notes: [CCTV 운영, 영상기기, 업무 촬영, 녹음]
+
+  - id: media
+    name: 영상·강의·성인 콘텐츠
+    signals:
+      packages: [video.js, hls.js, react-player, shaka-player, dashjs, "@mux/"]
+      paths: [vod, movie, movies, lecture, lectures, course, courses, adult]
+    scope_notes: [유료 VOD, OTT·VOD, DRM 우회, 미디어 처리, 이러닝, 성인 콘텐츠]
+
+  - id: crawling
+    name: 크롤링·외부 정보 수집
+    signals:
+      packages: [puppeteer, puppeteer-core, cheerio, crawlee, selenium-webdriver, playwright]
+      paths: [crawler, crawling, scraper, scraping, crawl, scrape]
+    scope_notes: [크롤링, 크롤링·연동, 공개정보 수집, 타인정보 수집, 공개정보 게시]
+
+  - id: game
+    name: 게임
+    signals:
+      packages: [phaser, pixi.js, "@pixi/", kaboom, excalibur]
+      paths: [game, games, gacha, betting]
+    scope_notes: [온라인 게임, 게임, 웹보드게임, 게임 거래, 게임 자동화, 대리 게임, 게임 뽑기, 게임 베타, 사설 서버, 스포츠 베팅]
+
+  - id: ticket
+    name: 티켓·공연 예매
+    signals:
+      paths: [tickets, ticketing, seat, seats, concert]
+    scope_notes: [티켓 중개, 티켓 예매, 티켓 재판매, 예매 자동화, 공연 예매]
+
+  - id: credit
+    name: 신용·금융 정보
+    signals:
+      paths: [loan, loans, credit, mydata, debt]
+      calls: [api.upbit.com, api.bithumb.com]
+    scope_notes: [신용정보, 마이데이터, 마이데이터 수신, 전송 대리, 신용조회, 연체정보 등록, 채권 추심, 금융 자문, 가상자산 거래, 가상자산 시세]
+
+  - id: health
+    name: 의료·건강
+    signals:
+      paths: [hospital, clinic, medical, patient, patients, prescription, pharmacy, medicine, emr]
+    scope_notes: [진료 중개, EMR, EMR 연동, 병원 예약, 처방전 전달, 전자처방전, 의약품 판매, 유전자검사]
+
+  - id: recruit
+    name: 채용·구인구직
+    signals:
+      paths: [recruit, recruitment, resume, applicant, applicants, hiring, career, careers]
+    scope_notes: [채용, 구인구직, 직업소개]
+
+  - id: hr
+    name: 근로·인사 관리
+    signals:
+      paths: [attendance, payroll, salary, employee, employees, vacation, timesheet]
+    scope_notes: [급여, 근태, 연차·휴가, 인사 관리]
+
+  - id: web-ui
+    name: 웹 화면(접근성)
+    signals:
+      screens: true
+    duties:
+      - disc-decree-14-2-h1
+      - dincl-19-2
+      - dvnotice-9-1
+      - dvnotice-9-2
+      - dvnotice-10-1
+      - dvnotice-12-1
+      - dvnotice-13-1
+      - dvnotice-16-2-web-alt
+      - dvnotice-16-2-web-media
+      - dvnotice-16-2-web-keyboard
+      - dvnotice-16-2-web-structure
+      - dvnotice-16-2-web-forms
+      - dvnotice-16-2-web-motion
+      - dvnotice-16-2-web-robust
+      - dvnotice-16-2-web-input
+
+  - id: mobile-app
+    name: 모바일 앱
+    signals:
+      packages: [react-native, expo, "@capacitor/core", "@ionic/react", "@ionic/angular", cordova]
+    scope_notes: [모바일 앱, 설치형 프로그램, 단말 식별]
+    duties: [disc-21-2, disc-decree-14-6-h4, disc-decree-14-6-h5, dvnotice-16-2-app]

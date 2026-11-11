@@ -1,0 +1,267 @@
+"""저장소 프로필: 이 서비스가 하는 일(기능)과 그 기능에 걸릴 수 있는 의무. 모델을 부르지 않는다.
+
+기능은 `features.yaml` 의 신호(package.json 의존성, import 한 꾸러미, 경로 낱말, 글자 그대로의 호출 모양, 화면 파일)로
+알아본다. 의무는 `duties.jsonl`(scripts/lawmap_table.py 가 의무 지도에서 만든 표)에서 그 기능에 붙은 것을 싣는다.
+여기서는 판단하지 않는다. "이 기능이 있으니 이 의무가 걸릴 수 있다"까지만이다(목록 층).
+
+시험·픽스처·설정 파일(index/roles.py 의 test·config)의 신호는 기능으로 세지 않고 `test_only` 로 따로 낸다.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
+
+from ruamel.yaml import YAML
+
+from policypack import __version__
+from policypack.discover import SKIP_DIRS, discover
+from policypack.index.graph import _IMPORT, READ_BYTES
+from policypack.index.roles import SERVICE, Role, classify
+
+HERE = Path(__file__).parent
+PROFILE_VERSION = 1
+EVIDENCE_SHOWN = 5
+"""기능마다 싣는 근거 수. 전체 수는 evidence_total 에 있다."""
+PLATFORM = {"web-ui", "mobile-app"}
+"""화면·앱 자체를 뜻하는 기능. 이것만 있으면 서비스 기능(가입·결제 등)을 찾지 못한 것으로 본다."""
+_KIND_ORDER = {"package": 0, "import": 1, "call": 2, "path": 3, "screens": 4}
+_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|\d+")
+_COMMENT = ("//", "/*", "*")
+
+
+@cache
+def load_features() -> dict:
+    return YAML(typ="safe").load((HERE / "features.yaml").read_text(encoding="utf-8"))
+
+
+@cache
+def load_duties() -> tuple[dict, ...]:
+    lines = (HERE / "duties.jsonl").read_text(encoding="utf-8").splitlines()
+    return tuple(json.loads(line) for line in lines if line.strip())
+
+
+@dataclass(frozen=True)
+class Hit:
+    feature: str
+    kind: str  # package · import · call · path · screens
+    value: str
+    file: str
+    line: int | None
+    service: bool
+
+    def record(self) -> dict:
+        what = {
+            "package": f"package.json 의 dependencies 에 {self.value}",
+            "import": f"{self.value} 를 불러옴",
+            "call": f"{self.value} 호출·주소",
+            "path": f"경로 낱말 '{self.value}'",
+            "screens": "화면 파일(JSX·TSX)",
+        }[self.kind]
+        return {"file": self.file, "line": self.line, "signal": self.kind, "value": self.value, "what": what}
+
+
+def path_words(rel: str) -> set[str]:
+    """경로를 낱말로 나눈다. 폴더·파일 이름(첫 점 앞)을 대소문자 경계와 부호로 자르고, 붙은 두 낱말을 이은 것도
+    넣는다."""
+    parts = rel.split("/")
+    words: set[str] = set()
+    for i, seg in enumerate(parts):
+        if i == len(parts) - 1:
+            seg = seg.split(".")[0]
+        toks = [t.lower() for t in _WORD.findall(seg)]
+        words.update(toks)
+        words.update(a + b for a, b in zip(toks, toks[1:], strict=False))
+    return words
+
+
+def package_of(spec: str) -> str | None:
+    """import 한 이름 → npm 꾸러미 이름. 상대 경로·별칭(@/, ~/)·node: 는 None."""
+    if spec.startswith((".", "/", "@/", "~/", "#", "node:")):
+        return None
+    bits = spec.split("/")
+    if spec.startswith("@"):
+        return "/".join(bits[:2]) if len(bits) > 1 else None
+    return bits[0]
+
+
+class Matcher:
+    def __init__(self, features: list[dict]) -> None:
+        self.packages: list[tuple[str, str]] = []  # (이름 또는 '범위/', 기능)
+        self.paths: dict[str, list[str]] = {}
+        self.calls: dict[str, list[str]] = {}
+        self.screens: list[str] = []
+        for f in features:
+            sig = f.get("signals") or {}
+            self.packages += [(p, f["id"]) for p in sig.get("packages") or []]
+            for w in sig.get("paths") or []:
+                self.paths.setdefault(w, []).append(f["id"])
+            for c in sig.get("calls") or []:
+                self.calls.setdefault(c, []).append(f["id"])
+            if sig.get("screens"):
+                self.screens.append(f["id"])
+        alts = [
+            re.escape(c) + (r"(?![\w$])" if re.match(r"[\w$]", c[-1]) else "")
+            for c in sorted(self.calls, key=len, reverse=True)
+        ]
+        self.call_re = re.compile(r"(?<![\w$])(?:" + "|".join(alts) + ")") if alts else None
+
+    def package_features(self, name: str) -> list[str]:
+        return [f for p, f in self.packages if name == p or (p.endswith("/") and name.startswith(p))]
+
+
+def _line_of(text: str, needle: str) -> int | None:
+    k = text.find(needle)
+    return text.count("\n", 0, k) + 1 if k >= 0 else None
+
+
+def _package_jsons(root: Path):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        if "package.json" in filenames:
+            yield Path(dirpath) / "package.json"
+
+
+def scan(root: Path, m: Matcher) -> tuple[list[Hit], dict]:
+    hits: list[Hit] = []
+    counts = {"source": 0, "service": 0, "test_or_config": 0, "package_json": 0}
+
+    for pj in sorted(_package_jsons(root)):
+        rel = pj.relative_to(root).as_posix()
+        try:
+            text = pj.read_text(encoding="utf-8")
+            deps = json.loads(text).get("dependencies") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        counts["package_json"] += 1
+        service = classify(rel, text) in SERVICE
+        for name in deps if isinstance(deps, dict) else []:
+            for feat in m.package_features(name):
+                hits.append(Hit(feat, "package", name, rel, _line_of(text, f'"{name}"'), service))
+
+    for path in discover([root], ["javascript", "typescript"]).files:
+        rel = path.relative_to(root).as_posix()
+        try:
+            with open(path, "rb") as fh:
+                text = fh.read(READ_BYTES).decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        role = classify(rel, text)
+        service = role in SERVICE
+        counts["source"] += 1
+        counts["service" if service else "test_or_config"] += 1
+        if role is Role.SCREEN:
+            hits += [Hit(f, "screens", "screen", rel, None, service) for f in m.screens]
+        for w in sorted(path_words(rel) & m.paths.keys()):
+            hits += [Hit(f, "path", w, rel, None, service) for f in m.paths[w]]
+        for mt in _IMPORT.finditer(text):
+            name = package_of(mt.group(1) or mt.group(2))
+            if name:
+                line = text.count("\n", 0, mt.start()) + 1
+                hits += [Hit(f, "import", name, rel, line, service) for f in m.package_features(name)]
+        if m.call_re:
+            for n, line in enumerate(text.splitlines(), 1):
+                if line.lstrip().startswith(_COMMENT):
+                    continue
+                for mt in m.call_re.finditer(line):
+                    hits += [Hit(f, "call", mt.group(0), rel, n, service) for f in m.calls[mt.group(0)]]
+    return hits, counts
+
+
+def _duty_item(d: dict) -> dict:
+    return {
+        "id": d["id"],
+        "law": d["law"],
+        "article": d["article"],
+        "title": d["title"],
+        "duty": d["duty"],
+        "url": d["url"],
+        "review_candidate": d["review_candidate"],
+        "quote_check": d["quote_check"],
+    }
+
+
+def _duty_block(duties: list[dict]) -> dict:
+    return {
+        "count": len(duties),
+        "review_candidates": sum(d["review_candidate"] for d in duties),
+        "items": [_duty_item(d) for d in duties],
+    }
+
+
+def _evidence(hits: list[Hit]) -> list[dict]:
+    """기능 하나의 근거. 같은 신호(종류·값)는 한 번만 싣고, 꾸러미·호출처럼 뜻이 분명한 것을 앞에 둔다."""
+    seen, out = set(), []
+    for h in sorted(hits, key=lambda h: (_KIND_ORDER[h.kind], h.file, h.line or 0)):
+        key = (h.kind, h.value) if h.kind != "screens" else (h.kind, h.file)
+        if key not in seen:
+            seen.add(key)
+            out.append(h.record())
+    return out
+
+
+def profile(root: Path) -> dict:
+    spec = load_features()
+    features = spec["features"]
+    hits, counts = scan(root, Matcher(features))
+    by_feature: dict[str, list[Hit]] = {}
+    for h in hits:
+        by_feature.setdefault(h.feature, []).append(h)
+    duties = load_duties()
+
+    found, test_only = [], []
+    for f in features:
+        fh = by_feature.get(f["id"], [])
+        service_hits = [h for h in fh if h.service]
+        if service_hits:
+            ev = _evidence(service_hits)
+            mine = [d for d in duties if d["feature"] == f["id"]]
+            found.append(
+                {
+                    "id": f["id"],
+                    "name": f["name"],
+                    "evidence": ev[:EVIDENCE_SHOWN],
+                    "evidence_total": len(ev),
+                    "duties": _duty_block(mine),
+                }
+            )
+        elif fh:
+            ev = _evidence(fh)
+            test_only.append(
+                {"id": f["id"], "name": f["name"], "evidence": ev[:EVIDENCE_SHOWN], "evidence_total": len(ev)}
+            )
+
+    service_features = [f for f in found if f["id"] not in PLATFORM]
+    out = {
+        "profile_version": PROFILE_VERSION,
+        "tool": {"name": "policypack", "version": __version__},
+        "files": counts,
+        "service_features": len(service_features),
+        "features": found,
+    }
+    if service_features:
+        common = [d for d in duties if d["feature"] == "common"]
+        out["common"] = {"name": spec["common"]["name"], "duties": _duty_block(common)}
+    else:
+        out["note"] = (
+            "서비스 기능(가입·결제·위치·AI 호출 등)을 하나도 찾지 못했습니다. "
+            + ("화면 파일은 있습니다. " if found else "")
+            + "라이브러리·예제·문서 저장소이거나, 이 도구가 아직 알아보지 못하는 모양일 수 있습니다."
+        )
+    status = [d for d in duties if d["feature"] == "status"]
+    out["status"] = {
+        "name": spec["status"]["name"],
+        "count": len(status),
+        "note": "공공기관·금융회사 등 운영 주체의 지위로 걸리는 의무입니다. 코드로 가리지 않아 목록에 싣지 않습니다.",
+    }
+    out["test_only"] = test_only
+    listed = sum(f["duties"]["count"] for f in found) + (out["common"]["duties"]["count"] if "common" in out else 0)
+    review = sum(f["duties"]["review_candidates"] for f in found) + (
+        out["common"]["duties"]["review_candidates"] if "common" in out else 0
+    )
+    out["totals"] = {"features": len(found), "duties": listed, "review_candidates": review}
+    return out

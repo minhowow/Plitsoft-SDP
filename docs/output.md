@@ -72,6 +72,24 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 - 독립 검토(`independent`)에는 정적 판정이 없다. 답을 받지 못한 정책이 있으면 경고가 없어도 종료 코드가 1 이다
   (`--fail-on uncertain`, 기본).
 
+## 저장소 프로필(`policypack profile <폴더>`, 11/11 부터)
+
+모델을 부르지 않는다. 저장소가 하는 일(기능)과 그 기능에 걸릴 수 있는 의무를 낸다. 판단은 하지 않는다(목록 층).
+`profile_version` 은 1 이고 위 보고서와 같은 판 규칙(키를 더할 때는 그대로)을 따른다.
+
+| 키 | 뜻 |
+|---|---|
+| `features[]` | 감지된 기능(`id`, `name`). `evidence[]` 는 근거 파일·줄·신호 종류(`package`·`import`·`call`·`path`·`screens`)·본 것, 앞의 5개만 싣고 전체 수는 `evidence_total` |
+| `features[].duties` | 그 기능에 붙은 의무 `count`, 검토 층 후보 수 `review_candidates`, `items[]`(id, 법, 조문, 제목, 의무 한 줄, 법제처 링크, 후보 여부, 조문 인용 대조 결과) |
+| `service_features` | 화면·앱(`web-ui`·`mobile-app`)을 뺀 기능 수. 0 이면 `note` 가 그 사실을 적고 `common` 이 없다 |
+| `common` | 거의 모든 서비스에 걸리는 의무(처리방침·안전조치 등). 서비스 기능이 하나라도 있을 때만 |
+| `status` | 운영 주체의 지위(공공기관·금융회사 등)로 걸리는 의무 수. 코드로 가리지 않아 목록은 싣지 않는다 |
+| `test_only[]` | 시험·픽스처·설정 파일에서만 본 기능 신호. 기능으로 세지 않는다 |
+| `files`, `totals` | 본 파일 수(서비스 코드 / 시험·설정, package.json), 기능·의무·후보 합계 |
+
+기능과 신호는 `src/policypack/profile/features.yaml`, 기능–의무 표는 `src/policypack/profile/duties.jsonl`(만드는 법은
+`scripts/lawmap_table.py`)에 있다.
+
 ## 아직 없는 것
 
 - 정책별 요약(정책마다 단위 수와 상태별 수), 결과에 실린 CLI 커밋·검사 시각, 팩 메타데이터 내보내기 명령.
