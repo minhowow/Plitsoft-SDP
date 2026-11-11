@@ -90,6 +90,25 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 기능과 신호는 `src/policypack/profile/features.yaml`, 기능–의무 표는 `src/policypack/profile/duties.jsonl`(만드는 법은
 `scripts/lawmap_table.py`)에 있다.
 
+## 저장소 검토(`policypack review <폴더>`, 11/11 부터)
+
+스키마는 [`schemas/review-1.json`](../schemas/review-1.json), `review_version` 은 1(키를 더할 때는 그대로)이다.
+조사 모델(`--model`, 기본 haiku)이 저장소를 읽고, 다른 모델(`--checker`, 기본 sonnet)이 반박한다. 질문은 기본으로
+의무 하나씩이다(`--batch duty`; `feature` 는 기능 하나에 의무 8개까지 묶어 싸다). 모델이 읽은 파일의
+코드가 밖으로 나간다(비밀값은 가리고 .env 등은 읽지 않는다). `--plan` 은 모델 없이 물을 의무와 질문 수만 낸다.
+
+| 키 | 뜻 |
+|---|---|
+| `profile` | 서비스 요약(`summary`), 기능(`sources`: signal·model·static, 모델이 더한 근거 `model_citations`, 인용과 함께 뺀 것은 `removed`) |
+| `data_flow` | 개인정보 흐름. `nodes[]`(input·server·store·external, 다루는 항목 `data`, 인용) 와 `edges[]`(from→to). 인용이 관문을 통과한 것만 |
+| `obligations.listed[]` | 목록 층: 감지된 기능과 거의 모든 서비스에 걸릴 수 있는 의무. `in_checklist` 는 검토 층에 들었는지 |
+| `checklist[]` | 검토 층: 의무마다 `status`(evidence-found 충족 근거 있음 · to-check 확인할 것 · not-applicable 해당 없음 · unknown 모름), 인용, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 결과 `verification`(upheld · overturned · overturn-ungrounded · not-run), 내장 팩 정적 결과 `static` |
+| `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(보수 단가), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 못 물은 의무(`not_asked`: cost-cap·time-cap·no-answer·parse), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
+
+- '충족 근거 있음'·'해당 없음'은 인용이 관문을 통과하고 시험·설정 파일의 줄이 아닐 때만 남는다. 아니면 '확인할 것'이다.
+- 반박이 '뒤집음'이라 해도 인용이 관문을 통과하지 못하면 받지 않는다(`overturn-ungrounded`, 상태는 그대로).
+- 상한에 걸려 묻지 못한 의무도 `checklist` 에 '모름'으로 남고 `not_answered` 에 까닭이 있다.
+
 ## 아직 없는 것
 
 - 정책별 요약(정책마다 단위 수와 상태별 수), 결과에 실린 CLI 커밋·검사 시각, 팩 메타데이터 내보내기 명령.
