@@ -37,6 +37,7 @@ UNTESTED_WHY = {
     "citation-rejected": "판정자가 '예'라고 했지만 인용을 코드에서 확인하지 못했습니다",
     "weak-unconfirmed": "이름만 본 약한 근거라 AI 확인 없이는 풀지 않았습니다(이 규칙에는 AI 대안이 없습니다)",
     "timeout": "판정자가 시간 안에 답하지 않았습니다",
+    "test-file": "시험·픽스처 파일이라 AI 에게 묻지 않았습니다",
 }
 
 

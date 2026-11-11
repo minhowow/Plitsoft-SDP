@@ -1,14 +1,23 @@
 """저장소 검토(`policypack review`): 프로필 → 이해 → 의무별 근거 찾기 → 반박 검증 → 체크리스트.
 
-1. 프로필(profile): 규칙 신호로 기능을 알아본다. 모델 호출 0회.
+1. 프로필(profile): 규칙 신호로 기능과 플랫폼(웹·모바일 앱·서버)을 알아본다. 모델 호출 0회.
 2. 이해: 조사 모델이 저장소를 읽고 무슨 서비스인지 적고, 신호가 놓친 기능을 더하거나 아닌 기능을 빼고, 개인정보
-   흐름(마디와 화살표)을 그린다. 더하기·빼기·마디·화살표 모두 인용이 관문을 통과해야 받는다.
+   흐름(마디와 화살표)을 그린다. 더하기·빼기·마디·화살표 모두 인용이 관문을 통과해야 받는다. 같은 커밋의 앞 결과를
+   넘기면(`reuse`) 묻지 않고 그 결과를 관문에 다시 걸어 쓴다.
 3. 의무: 기능에 붙은 의무 전부가 목록 층이다. 그 가운데 검토 층 후보(조문 인용 대조 통과·확신 높음·지위가 아님)와 내장
    팩(kr-core)이 다루는 의무를 묻는다. 묶음은 의무 하나(기본) 또는 기능 하나(의무 최대 8개)다(`batch`).
-4. 근거 찾기: 조사 모델이 의무마다 `충족 근거 있음 / 확인할 것 / 해당 없음 / 모름` 과 인용·질문을 낸다.
-   목록에서 빼는 답(충족·해당 없음)은 인용이 관문을 통과하고 시험·설정 파일이 아니어야 받고, 아니면 '확인할 것'이다.
-5. 반박: 다른 모델이 빼는 답에는 "지키지 않은 곳을 찾아라", '확인할 것'에는 "지킨 근거를 찾아라"로 다시 본다.
-   뒤집는 답도 인용이 관문을 통과해야 받는다. '모름'은 반박하지 않는다.
+4. 근거 찾기: 조사 모델이 의무마다 상태와 인용·검색·질문을 낸다. 상태(prompts.STATUS_LABEL)와 받는 조건:
+     충족 근거 있음        인용이 관문을 통과해야 한다. 아니면 '저장소 밖에서 확인할 것'
+     코드에서 본 것        걸리는 처리의 인용이 관문을 통과해야 한다. 아니면 '저장소 밖에서 확인할 것'
+     저장소 밖에서 확인할 것 · 해당 여부부터 확인할 것   그대로
+     해당 없음             찾아본 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같아야 한다(부재의 증명).
+                           아니면 '걸리지 않는 것으로 보임(확인 안 됨)'이고 확인 목록에 올리지 않는다
+   시험·설정 파일의 줄은 인용으로 받지 않는다. 요건은 조문 인용에 있는 것만 묻는다.
+5. 반박: 다른 모델이 빼는 답(충족·해당 없음·걸리지 않는 것으로 보임)에는 "지키지 않은 곳을 찾아라", 코드에서 본 것과
+   저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다. 앞
+   판단이 조문에 없는 요건을 들었는지도 적는다(off_quote). 해당 여부는 사업자의 판단이라 반박하지 않는다.
+6. 체크리스트는 상태의 갈래 순(코드에서 본 것이 맨 위), 그 안에서는 거의 모든 서비스·가입·AI·외부 전송 순이다.
+   `summary` 에 갈래별 수와 맨 위 다섯 건이 있다.
 
 지키는 것: 인용 관문, 비밀값 가리기·비밀 파일 거부(judge/agent.RepoTools), 저장소 밖 읽기 금지, 저장소당 상한(어림
 금액·시간). 상한 때문에 묻지 못한 의무는 '모름'으로 싣고 까닭을 적는다. 동시 요청은 429 를 보면 반으로 줄인다.
@@ -19,6 +28,8 @@
 from __future__ import annotations
 
 import io
+import re
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,23 +40,29 @@ from pathlib import Path
 from policypack import __version__
 from policypack.evaluate.agent_pass import gate
 from policypack.index.roles import SERVICE, classify
-from policypack.judge.agent import AgentAnswer, AgentJudge
+from policypack.judge.agent import AgentAnswer, AgentJudge, RepoTools
 from policypack.profile import load_duties, load_features, profile
 from policypack.review import prompts as P
 
-REVIEW_VERSION = 1
-PRIORITY = ("common", "signup", "auth", "genai", "external-transfer")
-"""상한에 걸리면 이 순서로 먼저 묻는다(거의 모든 서비스, 가입, 로그인, AI, 외부 전송). 나머지는 프로필의 기능 순서다."""
+REVIEW_VERSION = 2
+"""1 → 2: '확인할 것'을 세 갈래(seen-in-code·check-outside·check-applicability)로 나누고, 부재 증명(searches)과
+'걸리지 않는 것으로 보임'(likely-not-applicable)을 더했다. 체크리스트를 갈래 순으로 늘어놓고 summary 를 더했다."""
+PRIORITY = ("common", "signup", "genai", "external-transfer")
+"""상한에 걸리면 이 순서로 먼저 묻고, 체크리스트의 같은 갈래 안에서도 이 순서로 놓는다. 나머지는 기능 목록의 순서다."""
 GROUP_MAX = 8
-DROPS = ("evidence-found", "not-applicable")
+DROPS = ("evidence-found", "not-applicable", "likely-not-applicable")
+"""목록에서 빼는 상태. 반박이 "지키지 않은 곳"을 찾는다."""
+TO_CHECK = ("seen-in-code", "check-outside")
+"""반박이 "지킨 근거"를 찾는 상태. 해당 여부(check-applicability)는 사업자의 판단이라 묻지 않는다."""
+PLATFORM_KO = {"web": "웹", "mobile": "모바일 앱", "server": "서버"}
 NOT_ANSWERED = {"cost-cap": "저장소당 금액 상한에 걸려 묻지 못했습니다", "time-cap": "시간 상한에 걸렸습니다"}
 PRICES = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
 """100만 토큰당 달러(입력, 출력). 보수 단가다. 모르는 모델은 opus 값으로 센다. 캐시 쓰기는 입력의 1.25배, 읽기는
 0.1배."""
 RESERVE = {"haiku": 0.15, "sonnet": 0.45, "opus": 2.0}
+"""질문 하나를 새로 보내기 전에 남아 있어야 하는 어림 금액. 대화 중에는 멈출 수 없어 상한을 넘지 않게 미리 남긴다."""
 MAX_TOKENS = 16000
 """답 하나의 출력 상한. 이해 단계의 흐름과 기능 묶음의 답이 8192 에서 잘렸다(11/11 실측). 쓴 만큼만 청구된다."""
-"""질문 하나를 새로 보내기 전에 남아 있어야 하는 어림 금액. 대화 중에는 멈출 수 없어 상한을 넘지 않게 미리 남긴다."""
 
 
 # ── 상한과 속도 ─────────────────────────────────────────────────────
@@ -147,6 +164,31 @@ def grounded(cs: list[dict]) -> bool:
     return any(c["ok"] for c in cs)
 
 
+def prove(root: Path, searches: list[dict]) -> tuple[list[dict], bool]:
+    """모델이 "찾아봤는데 없다"며 낸 검색을 저장소에서 다시 돌린다. 검색마다 {pattern, path, claimed, found, ok, why}.
+    증명은 검색이 하나 이상이고 모두 줄 수가 같을 때다(why: match). 다르면 mismatch, 정규식이 틀리거나 두 글자보다
+    짧으면 bad-pattern, 저장소 밖이면 outside-repo, 줄 수를 적지 않았으면 no-count 다."""
+    tools, out = RepoTools(root), []
+    for s in searches:
+        pattern, path = str(s.get("pattern") or ""), str(s.get("path") or ".")
+        claimed = s.get("hits") if isinstance(s.get("hits"), int) else None
+        rec = {"pattern": pattern[:200], "path": path[:200], "claimed": claimed, "found": None, "ok": False, "why": ""}
+        if len(pattern.strip()) < 2:
+            rec["why"] = "bad-pattern"
+        else:
+            try:
+                rec["found"] = tools.count(pattern, path)
+            except re.error:
+                rec["why"] = "bad-pattern"
+            except ValueError:
+                rec["why"] = "outside-repo"
+        if rec["found"] is not None:
+            rec["why"] = "no-count" if claimed is None else "match" if claimed == rec["found"] else "mismatch"
+            rec["ok"] = rec["why"] == "match"
+        out.append(rec)
+    return out, bool(out) and all(r["ok"] for r in out)
+
+
 # ── 질문 기록 ─────────────────────────────────────────────────────────
 
 
@@ -228,17 +270,28 @@ def _found_lines(prof: dict) -> str:
     return "\n".join(rows) or "- (없음)"
 
 
+def _platforms(prof: dict) -> str:
+    return ", ".join(PLATFORM_KO[p] for p in prof.get("platforms", [])) or "알 수 없음(package.json 으로 가르지 못함)"
+
+
 def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
     budget = 40
     prompt = P.UNDERSTAND.format(
         found=_found_lines(prof),
+        platforms=_platforms(prof),
         catalog="\n".join(f"- {k}: {v}" for k, v in catalog.items()),
         budget=budget,
         cite=P.CITE,
         rules=P.RULES,
     )
     doc, _, _ = run.ask("understand", run.investigator, prompt, budget, {}, "summary")
+    return _understood(run.root, doc, catalog)
+
+
+def _understood(root: Path, doc: dict | None, catalog: dict[str, str], reused: bool = False) -> dict:
+    """이해 단계의 답(또는 앞 결과에서 되살린 같은 꼴)을 관문에 건다."""
     out = {"summary": "", "added": [], "removed": [], "nodes": [], "edges": [], "rejected_claims": 0, "answered": False}
+    out["reused"] = reused
     if doc is None:
         return out
     out["answered"] = True
@@ -247,7 +300,7 @@ def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
         for item in doc.get(key) or []:
             if not isinstance(item, dict) or item.get("feature") not in catalog:
                 continue
-            cs = check(run.root, P.citations_of(item))
+            cs = check(root, P.citations_of(item))
             rec = {"feature": item["feature"], "reason": str(item.get("reason") or ""), "citations": cs}
             if grounded(cs):
                 out[dest].append(rec)
@@ -258,7 +311,7 @@ def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
     for n in flow.get("nodes") or []:
         if not isinstance(n, dict) or not isinstance(n.get("id"), str):
             continue
-        cs = check(run.root, P.citations_of(n))
+        cs = check(root, P.citations_of(n))
         if not grounded(cs):
             out["rejected_claims"] += 1
             continue
@@ -276,7 +329,7 @@ def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
     for e in flow.get("edges") or []:
         if not isinstance(e, dict) or e.get("from") not in kept or e.get("to") not in kept:
             continue
-        cs = check(run.root, P.citations_of(e))
+        cs = check(root, P.citations_of(e))
         if not grounded(cs):
             out["rejected_claims"] += 1
             continue
@@ -284,6 +337,33 @@ def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
             {"from": e["from"], "to": e["to"], "data": [str(x)[:40] for x in e.get("data") or []][:12], "citations": cs}
         )
     return out
+
+
+def from_previous(root: Path, prev: dict, catalog: dict[str, str]) -> dict:
+    """앞 review 결과(같은 저장소·커밋)의 이해 단계 결과를 되살린다. 인용은 지금 저장소에서 관문에 다시 건다."""
+    prof = prev.get("profile") or {}
+    flow = prev.get("data_flow") or {}
+    doc = {
+        "summary": prof.get("summary", ""),
+        "features_added": [
+            {"feature": f["id"], "citations": f.get("model_citations", []), "reason": f.get("model_reason", "")}
+            for f in prof.get("features", [])
+            if "model" in f.get("sources", [])
+        ],
+        "features_removed": [
+            {"feature": f["id"], **f["removed"]} for f in prof.get("features", []) if isinstance(f.get("removed"), dict)
+        ],
+        "flow": {"nodes": flow.get("nodes", []), "edges": flow.get("edges", [])},
+    }
+    return _understood(root, doc, catalog, reused=True)
+
+
+def commit_of(root: Path) -> str | None:
+    try:
+        out = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else None
 
 
 # ── 3. 정적 결과(kr-core) ────────────────────────────────────────────
@@ -340,15 +420,29 @@ def _budget(n: int, base: int, per: int, cap: int) -> int:
     return min(base + per * max(0, n - 1), cap)
 
 
-def investigate(run: Run, group: list[dict], feature: dict | None, summary: str, static: dict) -> dict[str, dict]:
+def _status(answered: str, cites: list[dict], proven: bool) -> str:
+    """모델이 고른 상태에 받는 조건을 건다."""
+    if answered in ("evidence-found", "seen-in-code") and not grounded(cites):
+        return "check-outside"
+    if answered == "not-applicable" and not proven:
+        return "likely-not-applicable"
+    return answered
+
+
+def investigate(
+    run: Run, group: list[dict], feature: dict | None, summary: str, static: dict, platforms: str
+) -> dict[str, dict]:
     budget = _budget(len(group), 20, 3, 40)
     prompt = P.INVESTIGATE.format(
         summary=summary or "(이해 단계의 요약 없음)",
+        platforms=platforms,
         evidence=_evidence_lines(feature),
         static=_static_lines(group, static),
         duties="\n".join(P.duty_block(d) for d in group),
         budget=budget,
         cite=P.CITE,
+        search=P.SEARCH,
+        absence=P.ABSENCE,
         rules=P.RULES,
     )
     meta = {"feature": group[0]["feature"], "duties": [d["id"] for d in group]}
@@ -358,18 +452,17 @@ def investigate(run: Run, group: list[dict], feature: dict | None, summary: str,
         return {d["id"]: {"asked": False, "why": failure, "q": qn} for d in group}
     wanted = {d["id"] for d in group}
     for r in (doc or {}).get("results") or []:
-        if not isinstance(r, dict) or r.get("duty") not in wanted or r.get("status") not in P.STATUS_OF:
+        if not isinstance(r, dict) or r.get("duty") not in wanted or r.get("status") not in P.ANSWER:
             continue
-        status = P.STATUS_OF[r["status"]]
+        answered = P.ANSWER[r["status"]]
         cs = check(run.root, P.citations_of(r))
-        first = status
-        if status in DROPS and not grounded(cs):
-            status = "to-check"
+        searches, proven = prove(run.root, P.searches_of(r))
         results[r["duty"]] = {
             "asked": True,
-            "status": status,
-            "answered": first,
+            "status": _status(answered, cs, proven),
+            "answered": answered,
             "citations": cs,
+            "searches": searches,
             "question": str(r.get("question") or "")[:400],
             "reason": str(r.get("reason") or "")[:800],
             "q": qn,
@@ -380,8 +473,8 @@ def investigate(run: Run, group: list[dict], feature: dict | None, summary: str,
     return results
 
 
-def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str) -> dict[str, dict]:
-    items = [d for d in group if first.get(d["id"], {}).get("status") in (*DROPS, "to-check")]
+def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str, platforms: str) -> dict[str, dict]:
+    items = [d for d in group if first.get(d["id"], {}).get("status") in (*DROPS, *TO_CHECK)]
     if not items:
         return {}
     budget = _budget(len(items), 15, 3, 35)
@@ -391,11 +484,19 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str) -> 
         ok = [c for c in f["citations"] if c["ok"]]
         blocks.append(
             P.duty_block(d)
-            + f"\n  앞 판단: {P.STATUS_KO[f['status']]} — {f['reason']}"
+            + f"\n  앞 판단: {P.SAID[f['status']]} — {f['reason']}"
             + (f"\n  앞 인용: {P.cite_lines(ok)}" if ok else "")
+            + (f"\n  앞 검색: {P.search_lines(f['searches'])}" if f["searches"] else "")
         )
     prompt = P.REBUT.format(
-        summary=summary or "(요약 없음)", items="\n".join(blocks), budget=budget, cite=P.CITE, rules=P.RULES
+        summary=summary or "(요약 없음)",
+        platforms=platforms,
+        items="\n".join(blocks),
+        budget=budget,
+        cite=P.CITE,
+        search=P.SEARCH,
+        absence=P.ABSENCE,
+        rules=P.RULES,
     )
     meta = {"feature": group[0]["feature"], "duties": [d["id"] for d in items]}
     doc, failure, qn = run.ask("rebut", run.checker, prompt, budget, meta, "results")
@@ -407,18 +508,23 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str) -> 
         if not isinstance(r, dict) or r.get("duty") not in wanted or r.get("result") not in ("유지", "뒤집음"):
             continue
         cs = check(run.root, P.citations_of(r))
-        rec = {"citations": cs, "reason": str(r.get("reason") or "")[:800], "q": qn}
-        if r["result"] == "유지":
+        searches, proven = prove(run.root, P.searches_of(r))
+        rec = {
+            "citations": cs,
+            "searches": searches,
+            "off_quote": r.get("off_quote") is True,
+            "reason": str(r.get("reason") or "")[:800],
+            "q": qn,
+        }
+        before = first[r["duty"]]["status"]
+        claimed = P.ANSWER.get(r.get("status") or "", "")
+        if r["result"] == "유지" or (before in TO_CHECK and claimed not in ("evidence-found", "not-applicable")):
             out[r["duty"]] = {"result": "upheld", **rec}
             continue
-        before = first[r["duty"]]["status"]
-        claimed = P.STATUS_OF.get(r.get("status") or "", "")
-        # 빼는 답을 깨면 '확인할 것', '확인할 것'을 깨면 그 모델이 말한 빼는 상태(없으면 충족 근거 있음)
-        after = "to-check" if before in DROPS else claimed if claimed in DROPS else "evidence-found"
-        if grounded(cs):
-            out[r["duty"]] = {"result": "overturned", "status": after, **rec}
-        else:
-            out[r["duty"]] = {"result": "overturn-ungrounded", "status": after, **rec}
+        # 빼는 답을 깨면 '코드에서 본 것'(인용 필요), 확인할 것을 깨면 충족(인용 필요) 또는 해당 없음(검색 증명 필요)
+        after = "seen-in-code" if before in DROPS else claimed
+        ok = proven if after == "not-applicable" else grounded(cs)
+        out[r["duty"]] = {"result": "overturned" if ok else "overturn-ungrounded", "status": after, **rec}
     for d in items:
         out.setdefault(d["id"], {"result": "not-run", "why": failure or "no-answer", "q": qn})
     return out
@@ -447,25 +553,38 @@ def _item(d: dict, first: dict, check_: dict | None, static: list[dict]) -> dict
             "first": None,
             "verification": {"result": "not-run", "why": why},
             "citations": [],
+            "searches": [],
             "question": "",
             "reason": NOT_ANSWERED.get(why, "답을 받지 못했습니다"),
         }
-    status, citations = first["status"], first["citations"]
-    verification = {"result": "not-run", "why": "unknown" if status == "unknown" else "no-answer"}
+    status, citations, searches = first["status"], first["citations"], first["searches"]
+    why = "business-judgment" if status == "check-applicability" else "no-answer"
+    verification = {"result": "not-run", "why": why}
     if check_:
         verification = {k: v for k, v in check_.items() if k != "q"}
         if check_["result"] == "overturned":
-            status, citations = check_["status"], check_["citations"]
+            status, citations, searches = check_["status"], check_["citations"], check_["searches"]
     return {
         **base,
         "status": status,
         "asked": True,
-        "first": {k: first[k] for k in ("answered", "status", "citations", "reason", "question")},
+        "first": {k: first[k] for k in ("answered", "status", "citations", "searches", "reason", "question")},
         "verification": verification,
         "citations": citations,
+        "searches": searches,
         "question": first["question"],
         "reason": first["reason"] if status == first["status"] else verification.get("reason", ""),
     }
+
+
+def arrange(checklist: list[dict]) -> list[dict]:
+    """갈래 순(prompts.ORDER), 그 안에서는 PRIORITY·기능 목록 순, 의무 id 순. rank·status_label 을 붙인다."""
+    feats = [*PRIORITY, *(f["id"] for f in load_features()["features"] if f["id"] not in PRIORITY)]
+    pos = {f: i for i, f in enumerate(feats)}
+    out = sorted(checklist, key=lambda c: (P.ORDER.index(c["status"]), pos.get(c["feature"], 99), c["duty"]))
+    for i, c in enumerate(out, 1):
+        c["rank"], c["status_label"] = i, P.STATUS_LABEL[c["status"]]
+    return out
 
 
 # ── 전체 ─────────────────────────────────────────────────────────────
@@ -555,7 +674,9 @@ def review(
     limits: Limits | None = None,
     use_static: bool = True,
     throttles: tuple[Throttle, ...] = (),
+    reuse: dict | None = None,
 ) -> dict:
+    """`reuse` 는 같은 저장소·커밋의 앞 review 결과다. 주면 이해 단계를 묻지 않고 그 결과를 쓴다."""
     limits = limits or Limits()
     root = root.resolve()
     t0 = time.monotonic()
@@ -566,14 +687,15 @@ def review(
     prof = profile(root)
     static, static_err = static_results(root) if use_static else ({}, None)
     catalog = {f["id"]: f["name"] for f in load_features()["features"]}
-    und = understand(run, prof, catalog)
+    und = from_previous(root, reuse, catalog) if reuse is not None else understand(run, prof, catalog)
     features, listed, review_duties = select(prof, und, static)
     by_feature = {f["id"]: f for f in features}
     groups = groups_of(review_duties, limits.batch)
+    plats = _platforms(prof)
 
     def work(group: list[dict]) -> tuple[dict, dict]:
-        first = investigate(run, group, by_feature.get(group[0]["feature"]), und["summary"], static)
-        return first, rebut(run, group, first, und["summary"])
+        first = investigate(run, group, by_feature.get(group[0]["feature"]), und["summary"], static, plats)
+        return first, rebut(run, group, first, und["summary"], plats)
 
     firsts: dict[str, dict] = {}
     checks: dict[str, dict] = {}
@@ -582,7 +704,9 @@ def review(
             firsts |= first
             checks |= chk
 
-    checklist = [_item(d, firsts.get(d["id"], {}), checks.get(d["id"]), static.get(d["id"], [])) for d in review_duties]
+    checklist = arrange(
+        [_item(d, firsts.get(d["id"], {}), checks.get(d["id"]), static.get(d["id"], [])) for d in review_duties]
+    )
     seconds = time.monotonic() - t0
     return _report(run, prof, und, features, listed, checklist, static, static_err, seconds, throttles)
 
@@ -590,6 +714,8 @@ def review(
 def _report(run: Run, prof, und, features, listed, checklist, static, static_err, seconds, throttles) -> dict:
     in_checklist = {c["duty"] for c in checklist}
     cites = [c for q in checklist for c in (q["first"] or {}).get("citations", [])]
+    searches = [s for q in checklist for s in (q["first"] or {}).get("searches", [])]
+    searches += [s for q in checklist for s in q["verification"].get("searches", [])]
     cites += [c for q in checklist for c in q["verification"].get("citations", [])]
     for part in ("nodes", "edges"):
         cites += [c for x in und[part] for c in x["citations"]]
@@ -599,9 +725,7 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
         for k, v in (q.get("sent") or {}).get("masked", {}).items():
             masked[k] = masked.get(k, 0) + v
         refused |= set((q.get("sent") or {}).get("refused", []))
-    counts: dict[str, int] = {}
-    for c in checklist:
-        counts[c["status"]] = counts.get(c["status"], 0) + 1
+    counts = {s: sum(1 for c in checklist if c["status"] == s) for s in P.ORDER}
     verdicts: dict[str, int] = {}
     for c in checklist:
         verdicts[c["verification"]["result"]] = verdicts.get(c["verification"]["result"], 0) + 1
@@ -612,7 +736,14 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
     return {
         "review_version": REVIEW_VERSION,
         "tool": {"name": "policypack", "version": __version__},
+        "summary": {
+            "counts": counts,
+            "labels": P.STATUS_LABEL,
+            "top": [c["duty"] for c in checklist[:5]],
+        },
         "profile": {
+            "commit": commit_of(run.root),
+            "platforms": prof["platforms"],
             "summary": und["summary"],
             "features": features,
             "test_only": prof["test_only"],
@@ -650,7 +781,14 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
             "verification_counts": verdicts,
             "citations": len(cites),
             "citations_rejected": sum(1 for c in cites if not c["ok"]),
-            "understanding": {"answered": und["answered"], "rejected_claims": und["rejected_claims"]},
+            # 부재 주장의 검색. 관문이 다시 돌려 줄 수가 다른 것(mismatch 등)이 rejected 다
+            "searches": len(searches),
+            "searches_rejected": sum(1 for s in searches if not s["ok"]),
+            "understanding": {
+                "answered": und["answered"],
+                "rejected_claims": und["rejected_claims"],
+                "reused": und["reused"],
+            },
             "not_asked": not_asked,
             "masked": masked,
             "refused": sorted(refused),

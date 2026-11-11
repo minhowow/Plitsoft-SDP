@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import json
 import re
+import zlib
 from pathlib import Path
 
 import pytest
 
 from policypack import review as rv
 from policypack.judge.agent import AgentJudge
+from policypack.review import prompts as P
 
 jsonschema = pytest.importorskip("jsonschema")
-SCHEMA = json.loads((Path(__file__).resolve().parents[1] / "schemas" / "review-1.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((Path(__file__).resolve().parents[1] / "schemas" / "review-2.json").read_text(encoding="utf-8"))
 
 FILES = {
     "package.json": json.dumps({"dependencies": {"express": "^4.0.0"}}),
@@ -35,6 +37,18 @@ FILES = {
     "tests/signup.test.ts": 'it("signs up", () => {\n  expect(signup({ birthDate: "2015-01-01" })).toBe(true);\n});\n',
 }
 
+SIGNUP = {"file": "src/routes/signup.ts", "line": 4, "text": "const { email, name, birthDate } = req.body;"}
+STORE = {
+    "file": "src/routes/signup.ts",
+    "line": 9,
+    "text": "await db.user.create({ data: { email, name, birthDate } })",
+}
+OPENAI = {"file": "server/answer.py", "line": 4, "text": "return client.chat.completions.create("}
+FAKE = {"file": "src/routes/signup.ts", "line": 2, "text": "verifyGuardianConsent(birthDate)"}
+TEST_LINE = {"file": "tests/signup.test.ts", "line": 2, "text": 'expect(signup({ birthDate: "2015-01-01" }))'}
+ABSENT = {"pattern": "주민등록번호|residentNumber", "path": ".", "hits": 0}
+PRESENT_BUT_CLAIMED_ZERO = {"pattern": "birthDate", "path": ".", "hits": 0}
+
 
 def _repo(tmp_path: Path) -> Path:
     for name, text in FILES.items():
@@ -55,51 +69,59 @@ def _reply(doc: dict) -> dict:
     }
 
 
-SIGNUP = {"file": "src/routes/signup.ts", "line": 4, "text": "const { email, name, birthDate } = req.body;"}
-STORE = {
-    "file": "src/routes/signup.ts",
-    "line": 9,
-    "text": "await db.user.create({ data: { email, name, birthDate } })",
-}
-OPENAI = {"file": "server/answer.py", "line": 4, "text": "return client.chat.completions.create("}
-FAKE = {"file": "src/routes/signup.ts", "line": 2, "text": "verifyGuardianConsent(birthDate)"}
-TEST_LINE = {"file": "tests/signup.test.ts", "line": 2, "text": 'expect(signup({ birthDate: "2015-01-01" }))'}
+def _reply_text(text: str) -> dict:
+    return {"content": [{"type": "text", "text": text}], "usage": {"input_tokens": 10, "output_tokens": 5}}
 
 
 def _node(nid: str, kind: str, label: str, cite: dict) -> dict:
     return {"id": nid, "kind": kind, "label": label, "data": ["생년월일"], "citations": [cite]}
 
 
+UNDERSTOOD = {
+    "summary": "회원 가입을 받고 AI 답변을 주는 서비스다.",
+    "features_added": [
+        {"feature": "genai", "citations": [OPENAI], "reason": "Python 서버가 OpenAI 를 부른다"},
+        {"feature": "location", "citations": [FAKE], "reason": "지어낸 인용"},
+    ],
+    "features_removed": [{"feature": "auth", "citations": [], "reason": "인용 없음"}],
+    "flow": {
+        "nodes": [
+            _node("n1", "input", "가입 폼", SIGNUP),
+            _node("n2", "store", "DB", STORE),
+            _node("n3", "external", "OpenAI", OPENAI),
+            _node("n4", "external", "가짜", FAKE),
+        ],
+        "edges": [
+            {"from": "n1", "to": "n2", "data": ["생년월일"], "citations": [STORE]},
+            {"from": "n1", "to": "n4", "data": [], "citations": [STORE]},
+        ],
+    },
+}
+
+# 의무마다 정해진 가짜 답(의무 id 의 crc32 로 고른다). 받는 조건이 어떻게 걸리는지 하나씩 보인다
+ANSWERS = [
+    ("충족 근거 있음", [TEST_LINE], []),  # 시험 파일 인용 → 저장소 밖에서 확인할 것
+    ("해당 없음", [], [PRESENT_BUT_CLAIMED_ZERO]),  # 다시 돌리면 줄 수가 다르다 → 걸리지 않는 것으로 보임
+    ("해당 없음", [], [ABSENT]),  # 증명됨 → 해당 없음
+    ("확인할 것(코드에서 본 것)", [STORE], [ABSENT]),  # 인용 통과 → 코드에서 본 것
+    ("확인할 것(코드에서 본 것)", [FAKE], []),  # 지어낸 인용 → 저장소 밖에서 확인할 것
+    ("확인할 것(해당 여부)", [], []),
+]
+
+
+def answer_for(duty: str) -> tuple[str, list, list]:
+    return ANSWERS[zlib.crc32(duty.encode()) % len(ANSWERS)]
+
+
 def fake_investigator():
-    """첫 의무: 충족(인용이 시험 파일 → 확인할 것), 둘째: 해당 없음(지어낸 인용 → 확인할 것), 셋째: 확인할 것,
-    그 밖: 충족(관문 통과). 이해 단계는 신호가 못 본 AI 기능과 개인정보 흐름을 낸다. 첫 답 앞에 도구를 한 번 쓴다."""
+    """이해 단계는 신호가 못 본 AI 기능과 개인정보 흐름을 낸다. 의무마다 answer_for 의 답.
+    첫 답 앞에 도구를 한 번 쓴다."""
     seen: set[str] = set()
 
     def send(body: dict) -> dict:
         prompt = _text(body)
         if prompt.startswith("이 저장소가 어떤 서비스인지"):
-            return _reply(
-                {
-                    "summary": "회원 가입을 받고 AI 답변을 주는 서비스다.",
-                    "features_added": [
-                        {"feature": "genai", "citations": [OPENAI], "reason": "Python 서버가 OpenAI 를 부른다"},
-                        {"feature": "location", "citations": [FAKE], "reason": "지어낸 인용"},
-                    ],
-                    "features_removed": [{"feature": "auth", "citations": [], "reason": "인용 없음"}],
-                    "flow": {
-                        "nodes": [
-                            _node("n1", "input", "가입 폼", SIGNUP),
-                            _node("n2", "store", "DB", STORE),
-                            _node("n3", "external", "OpenAI", OPENAI),
-                            _node("n4", "external", "가짜", FAKE),
-                        ],
-                        "edges": [
-                            {"from": "n1", "to": "n2", "data": ["생년월일"], "citations": [STORE]},
-                            {"from": "n1", "to": "n4", "data": [], "citations": [STORE]},
-                        ],
-                    },
-                }
-            )
+            return _reply(UNDERSTOOD)
         ids = re.findall(r"^- \[([^\]]+)\]", prompt, re.M)
         key = ",".join(ids)
         if key not in seen and body["tool_choice"]["type"] != "none":
@@ -107,29 +129,48 @@ def fake_investigator():
             tool = {"type": "tool_use", "id": "t1", "name": "read_file", "input": {"path": "src/routes/signup.ts"}}
             return {"content": [tool], "usage": {"input_tokens": 500, "output_tokens": 20}}
         results = []
-        for i, d in enumerate(ids):
-            status, cites = ["충족 근거 있음", "해당 없음", "확인할 것", "충족 근거 있음"][min(i, 3)], [STORE]
-            cites = [TEST_LINE] if i == 0 else [FAKE] if i == 1 else cites
-            results.append({"duty": d, "status": status, "citations": cites, "question": "어디서?", "reason": "r"})
+        for d in ids:
+            status, cites, searches = answer_for(d)
+            results.append(
+                {
+                    "duty": d,
+                    "status": status,
+                    "citations": cites,
+                    "searches": searches,
+                    "question": "어디서?",
+                    "reason": d,
+                }
+            )
         return _reply({"results": results})
 
     return send
 
 
-def fake_checker(send_log: list):
-    """'확인할 것'은 뒤집어 충족(관문 통과)으로, 충족 근거 있음은 유지한다."""
+def fake_checker(log: list):
+    """검색 증명이 없는 '해당 없음'은 코드에서 본 것으로, 코드에서 본 것은 충족으로, 저장소 밖은 해당 없음(검색
+    증명)으로 뒤집는다. 저장소 밖을 뒤집을 때는 조문 밖 요건이었다고 적는다."""
 
     def send(body: dict) -> dict:
         prompt = _text(body)
-        send_log.append(prompt)
+        log.append(prompt)
         out = []
         for block in re.split(r"^(?=- \[)", prompt, flags=re.M)[1:]:
             d = re.match(r"- \[([^\]]+)\]", block).group(1)
-            if "앞 판단: 확인할 것" in block:
-                flip = {"result": "뒤집음", "status": "충족 근거 있음", "citations": [STORE], "reason": "x"}
-                out.append({"duty": d, **flip})
+            if "앞 판단: 해당 없음(검색 증명 없음)" in block:
+                flip = {"result": "뒤집음", "status": "확인할 것(코드에서 본 것)", "citations": [STORE], "searches": []}
+            elif "앞 판단: 확인할 것(코드에서 본 것)" in block:
+                flip = {"result": "뒤집음", "status": "충족 근거 있음", "citations": [STORE], "searches": []}
+            elif "앞 판단: 확인할 것(저장소 밖)" in block:
+                flip = {
+                    "result": "뒤집음",
+                    "status": "해당 없음",
+                    "citations": [],
+                    "searches": [ABSENT],
+                    "off_quote": True,
+                }
             else:
-                out.append({"duty": d, "result": "유지", "citations": [], "reason": "y"})
+                flip = {"result": "유지", "citations": [], "searches": []}
+            out.append({"duty": d, "reason": "x", **flip})
         return _reply({"results": out})
 
     return send
@@ -137,50 +178,101 @@ def fake_checker(send_log: list):
 
 def _run(root: Path, batch: str, **kw) -> tuple[dict, list]:
     log: list = []
-    inv = AgentJudge("claude-haiku-5-5", fake_investigator())
+    inv = AgentJudge("claude-haiku-5-5", kw.pop("investigator", None) or fake_investigator())
     chk = AgentJudge("claude-sonnet-5-5", fake_checker(log))
     limits = rv.Limits(usd=kw.pop("usd", 5.0), seconds=300, concurrency=2, batch=batch)
     return rv.review(root, inv, chk, limits, throttles=(rv.Throttle(2), rv.Throttle(2)), **kw), log
 
 
-@pytest.mark.parametrize("batch", ["feature", "duty"])
-def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, batch):
-    doc, log = _run(_repo(tmp_path), batch, use_static=batch == "feature")
+def _valid(doc: dict) -> None:
     errors = list(jsonschema.Draft202012Validator(SCHEMA).iter_errors(doc))
     assert not errors, [f"{list(e.path)}: {e.message[:200]}" for e in errors[:5]]
+
+
+@pytest.mark.parametrize("batch", ["duty", "feature"])
+def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, batch):
+    doc, log = _run(_repo(tmp_path), batch, use_static=batch == "duty")
+    _valid(doc)
 
     feats = {f["id"]: f for f in doc["profile"]["features"]}
     assert feats["genai"]["sources"] == ["model"] and feats["genai"]["model_citations"][0]["file"] == "server/answer.py"
     assert "location" not in feats  # 지어낸 인용으로는 기능을 더하지 못한다
     assert "removed" not in feats.get("auth", {})  # 인용 없이 빼지 못한다
+    assert doc["profile"]["platforms"] == ["server"]  # express 만 있다. 화면 파일이 있어도 웹이 아니다
+    assert "web-ui" not in feats
     assert [n["id"] for n in doc["data_flow"]["nodes"]] == ["n1", "n2", "n3"]
     assert [(e["from"], e["to"]) for e in doc["data_flow"]["edges"]] == [("n1", "n2")]
 
     items = doc["checklist"]
-    assert items and {i["status"] for i in items} <= {"evidence-found", "to-check", "not-applicable", "unknown"}
-    by_first = {}
+    firsts = [i["first"] for i in items if i["first"]]
+    # 받는 조건: 시험 파일·지어낸 인용은 코드에서 본 것·충족이 되지 못하고,
+    # 검색 줄 수가 다른 해당 없음은 '보임'으로 남는다
+    for f in firsts:
+        ok = any(c["ok"] for c in f["citations"])
+        proven = bool(f["searches"]) and all(s["ok"] for s in f["searches"])
+        if f["answered"] in ("evidence-found", "seen-in-code"):
+            assert f["status"] == (f["answered"] if ok else "check-outside")
+        if f["answered"] == "not-applicable":
+            assert f["status"] == ("not-applicable" if proven else "likely-not-applicable")
+    whys = {s["why"] for f in firsts for s in f["searches"]}
+    assert {"match", "mismatch"} <= whys
+    mismatch = next(s for f in firsts for s in f["searches"] if s["why"] == "mismatch")
+    assert mismatch["claimed"] == 0 and mismatch["found"] > 0
+    assert {f["status"] for f in firsts} >= {"check-outside", "likely-not-applicable", "not-applicable", "seen-in-code"}
+
+    # 반박: 해당 여부는 묻지 않고, 뒤집기는 인용·검색 조건을 넘은 것만
     for i in items:
-        by_first.setdefault(i["first"]["answered"], []).append(i)
-    # 시험 파일·지어낸 인용으로는 목록에서 빼지 못한다
-    assert any(c["why"] == "test-file" for i in items for c in i["first"]["citations"])
-    for i in items:
-        if i["first"]["answered"] in ("evidence-found", "not-applicable") and not any(
-            c["ok"] for c in i["first"]["citations"]
-        ):
-            assert i["first"]["status"] == "to-check"
-    # '확인할 것'은 반박이 인용과 함께 뒤집으면 충족이 된다
+        if i["status"] == "check-applicability":
+            assert i["verification"] == {"result": "not-run", "why": "business-judgment"}
     flipped = [i for i in items if i["verification"]["result"] == "overturned"]
-    assert flipped and all(i["status"] == "evidence-found" for i in flipped)
-    assert all("앞 판단" in p for p in log)
+    assert flipped
+    for i in flipped:
+        before = i["first"]["status"]
+        if before in rv.DROPS:
+            assert i["status"] == "seen-in-code"
+        elif before == "seen-in-code":
+            assert i["status"] == "evidence-found"
+        else:
+            assert i["status"] == "not-applicable" and i["verification"]["off_quote"] and i["searches"][0]["ok"]
+    assert not any("확인할 것(해당 여부)" in p for p in log)
+
+    # 순서: 갈래 순, rank 는 1부터, summary 의 맨 위 다섯 건
+    order = [P.ORDER.index(i["status"]) for i in items]
+    assert order == sorted(order) and [i["rank"] for i in items] == list(range(1, len(items) + 1))
+    assert doc["summary"]["top"] == [i["duty"] for i in items[:5]]
+    assert sum(doc["summary"]["counts"].values()) == len(items)
+    assert all(i["status_label"] == P.STATUS_LABEL[i["status"]] for i in items)
     run = doc["run"]
     assert run["calls"] > 0 and run["usd_estimate"] > 0 and run["citations_rejected"] > 0
-    assert run["status_counts"] and sum(run["status_counts"].values()) == len(items)
-    if batch == "feature":
+    assert run["searches"] > 0 and run["searches_rejected"] > 0
+    if batch == "duty":
         assert run["static"]["ran"]
         kid = next(i for i in items if i["duty"] == "pipa-22-2-1")
         assert kid["krcore"] and kid["static"] and kid["static"][0]["file"] == "src/routes/signup.ts"
-    else:
         assert all(len(q.get("duties", [])) <= 1 for q in run["questions"] if q["stage"] == "investigate")
+
+
+def test_a_saved_understanding_is_reused_without_asking(tmp_path):
+    root = _repo(tmp_path)
+    first, _ = _run(root, "duty", use_static=False)
+
+    def no_understanding(body):
+        assert not _text(body).startswith("이 저장소가 어떤 서비스인지"), "이해 단계를 다시 물었다"
+        return inner(body)
+
+    inner = fake_investigator()
+    again, _ = _run(root, "duty", use_static=False, reuse=first, investigator=no_understanding)
+    _valid(again)
+    assert not any(q["stage"] == "understand" for q in again["run"]["questions"])
+    assert again["run"]["understanding"]["reused"]
+    assert [f["id"] for f in again["profile"]["features"]] == [f["id"] for f in first["profile"]["features"]]
+
+    def flow(d):
+        cut = [(c["file"], c["line"], c["ok"]) for x in d["nodes"] + d["edges"] for c in x["citations"]]
+        return [x.get("id") or (x["from"], x["to"]) for x in d["nodes"] + d["edges"]], cut
+
+    assert flow(again["data_flow"]) == flow(first["data_flow"])
+    assert again["profile"]["summary"] == first["profile"]["summary"]
 
 
 def test_the_cost_cap_leaves_duties_unknown_and_says_why(tmp_path):
@@ -189,10 +281,10 @@ def test_the_cost_cap_leaves_duties_unknown_and_says_why(tmp_path):
     assert unknown and all(i["not_answered"] == "cost-cap" for i in unknown)
     assert doc["run"]["not_asked"]["cost-cap"] == len(unknown)
     assert doc["run"]["usd_estimate"] <= 0.16
-    # 상한에 걸리면 '거의 모든 서비스'와 가입·로그인·AI·외부 전송부터 묻는다
-    asked = [i["feature"] for i in doc["checklist"] if i["asked"]]
+    # 상한에 걸리면 '거의 모든 서비스'와 가입·AI·외부 전송부터 묻는다
+    asked = [q["feature"] for q in doc["run"]["questions"] if q["stage"] == "investigate" and q.get("calls")]
     assert asked and asked[0] == "common"
-    jsonschema.validate(doc, SCHEMA)
+    _valid(doc)
 
 
 def test_a_prose_answer_is_rewritten_once_into_json(tmp_path):
@@ -205,19 +297,29 @@ def test_a_prose_answer_is_rewritten_once_into_json(tmp_path):
             return _reply_text("두 파일을 더 읽겠습니다.")
         if prompt.startswith("아래는 네가 바로 앞에서 낸 답이다"):
             assert body["tool_choice"]["type"] == "none"
-            return inner({"messages": [{"content": "이 저장소가 어떤 서비스인지"}], "tool_choice": {"type": "none"}})
+            return _reply(UNDERSTOOD)
         return inner(body)
 
-    inv = AgentJudge("claude-haiku-5-5", send)
-    chk = AgentJudge("claude-sonnet-5-5", fake_checker([]))
-    doc = rv.review(_repo(tmp_path), inv, chk, rv.Limits(concurrency=1), use_static=False)
+    doc, _ = _run(_repo(tmp_path), "duty", use_static=False, investigator=send)
     q = doc["run"]["questions"][0]
     assert q["stage"] == "understand" and q["repaired"] and q["failure"] is None and q["calls"] == 2
     assert doc["profile"]["summary"] and doc["run"]["understanding"]["answered"]
 
 
-def _reply_text(text: str) -> dict:
-    return {"content": [{"type": "text", "text": text}], "usage": {"input_tokens": 10, "output_tokens": 5}}
+def test_absence_is_proven_by_rerunning_the_search(tmp_path):
+    root = _repo(tmp_path)
+    got, proven = rv.prove(root, [{"pattern": "birthDate", "hits": 3}, {"pattern": "주민등록번호", "hits": 0}])
+    assert proven and [s["found"] for s in got] == [3, 0]  # 가입 파일 두 줄 + 시험 파일 한 줄
+    for bad, why in (
+        ({"pattern": "birthDate", "hits": 0}, "mismatch"),
+        ({"pattern": "(", "hits": 0}, "bad-pattern"),
+        ({"pattern": "x", "hits": 0}, "bad-pattern"),
+        ({"pattern": "birthDate", "path": "../..", "hits": 0}, "outside-repo"),
+        ({"pattern": "birthDate"}, "no-count"),
+    ):
+        got, proven = rv.prove(root, [bad])
+        assert not proven and got[0]["why"] == why
+    assert rv.prove(root, []) == ([], False)
 
 
 def test_the_throttle_halves_on_429():

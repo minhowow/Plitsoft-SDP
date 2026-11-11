@@ -47,6 +47,9 @@ class UntestedReason(str, Enum):
     """이름·문자열만 본 약한 대안이 참인데, 이 규칙에는 확인할 AI 대안이 없어 풀지 않았다."""
     TIMEOUT = "timeout"
     """판정자가 시간 안에 답하지 않았다."""
+    TEST_FILE = "test-file"
+    """시험·픽스처·설정 파일이라 판정자에게 묻지 않았다(판정자가 없을 때와 같다). 픽스처가 많은 저장소에서 질문이
+    수백 개로 늘어 검사가 10분을 넘겼다(11/11, CLI 저장소: 경고 322건이 모두 정책 팩 픽스처)."""
 
 
 def reason_for_failure(failure: str | None) -> UntestedReason:

@@ -1,12 +1,43 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://policypack.dev/schemas/review-1.json",
+  "$id": "https://policypack.dev/schemas/review-2.json",
   "title": "policypack review 보고서",
-  "description": "policypack review <저장소> 의 JSON. 키를 더할 때는 review_version 을 올리지 않는다. 받는 쪽은 모르는 키를 무시한다.",
+  "description": "policypack review <저장소> 의 JSON. 키를 더할 때는 review_version 을 올리지 않는다. 받는 쪽은 모르는 키를 무시한다. 2: 확인할 것을 세 갈래로 나누고 부재 증명(searches)·summary·platforms 를 더했다.",
   "type": "object",
   "properties": {
     "review_version": {
-      "const": 1
+      "const": 2
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "top": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "counts",
+        "labels",
+        "top"
+      ],
+      "additionalProperties": false,
+      "description": "체크리스트의 갈래별 수, 갈래 이름, 맨 위 다섯 건의 의무 id. checklist 는 이미 이 순서로 늘어서 있다"
     },
     "tool": {
       "type": "object",
@@ -27,6 +58,22 @@
     "profile": {
       "type": "object",
       "properties": {
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "web",
+              "mobile",
+              "server"
+            ]
+          }
+        },
         "summary": {
           "type": "string"
         },
@@ -97,8 +144,10 @@
         }
       },
       "required": [
+        "commit",
         "features",
         "files",
+        "platforms",
         "summary",
         "test_only"
       ],
@@ -368,6 +417,14 @@
           "type": "integer",
           "minimum": 0
         },
+        "searches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "searches_rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
         "understanding": {
           "type": "object",
           "properties": {
@@ -377,11 +434,15 @@
             "rejected_claims": {
               "type": "integer",
               "minimum": 0
+            },
+            "reused": {
+              "type": "boolean"
             }
           },
           "required": [
             "answered",
-            "rejected_claims"
+            "rejected_claims",
+            "reused"
           ],
           "additionalProperties": false
         },
@@ -448,6 +509,8 @@
         "not_asked",
         "questions",
         "refused",
+        "searches",
+        "searches_rejected",
         "seconds",
         "static",
         "status_counts",
@@ -466,6 +529,7 @@
     "profile",
     "review_version",
     "run",
+    "summary",
     "tool"
   ],
   "additionalProperties": false,
@@ -552,6 +616,7 @@
             "package",
             "import",
             "call",
+            "url",
             "path",
             "screens"
           ]
@@ -578,6 +643,51 @@
         "type": "integer",
         "minimum": 0
       }
+    },
+    "search": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "claimed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "found": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "why": {
+          "enum": [
+            "match",
+            "mismatch",
+            "bad-pattern",
+            "outside-repo",
+            "no-count"
+          ]
+        }
+      },
+      "required": [
+        "claimed",
+        "found",
+        "ok",
+        "path",
+        "pattern",
+        "why"
+      ],
+      "additionalProperties": false,
+      "description": "부재 주장(없다는 말)의 검색. 관문이 저장소에서 다시 돌린 줄 수(found)가 모델이 적은 수(claimed)와 같으면 ok"
     },
     "static": {
       "type": "object",
@@ -700,10 +810,13 @@
         },
         "status": {
           "enum": [
+            "seen-in-code",
+            "check-outside",
+            "check-applicability",
+            "unknown",
             "evidence-found",
-            "to-check",
-            "not-applicable",
-            "unknown"
+            "likely-not-applicable",
+            "not-applicable"
           ]
         },
         "citations": {
@@ -711,6 +824,15 @@
           "items": {
             "$ref": "#/$defs/citation"
           }
+        },
+        "searches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/search"
+          }
+        },
+        "off_quote": {
+          "type": "boolean"
         },
         "reason": {
           "type": "string"
@@ -760,11 +882,21 @@
         },
         "status": {
           "enum": [
+            "seen-in-code",
+            "check-outside",
+            "check-applicability",
+            "unknown",
             "evidence-found",
-            "to-check",
-            "not-applicable",
-            "unknown"
+            "likely-not-applicable",
+            "not-applicable"
           ]
+        },
+        "status_label": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "integer",
+          "minimum": 0
         },
         "asked": {
           "type": "boolean"
@@ -780,23 +912,33 @@
                 "answered": {
                   "enum": [
                     "evidence-found",
-                    "to-check",
-                    "not-applicable",
-                    "unknown"
+                    "seen-in-code",
+                    "check-outside",
+                    "check-applicability",
+                    "not-applicable"
                   ]
                 },
                 "status": {
                   "enum": [
+                    "seen-in-code",
+                    "check-outside",
+                    "check-applicability",
+                    "unknown",
                     "evidence-found",
-                    "to-check",
-                    "not-applicable",
-                    "unknown"
+                    "likely-not-applicable",
+                    "not-applicable"
                   ]
                 },
                 "citations": {
                   "type": "array",
                   "items": {
                     "$ref": "#/$defs/citation"
+                  }
+                },
+                "searches": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/search"
                   }
                 },
                 "reason": {
@@ -811,6 +953,7 @@
                 "citations",
                 "question",
                 "reason",
+                "searches",
                 "status"
               ],
               "additionalProperties": false,
@@ -828,6 +971,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/citation"
+          }
+        },
+        "searches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/search"
           }
         },
         "question": {
@@ -849,9 +998,12 @@
         "law",
         "question",
         "quote",
+        "rank",
         "reason",
+        "searches",
         "static",
         "status",
+        "status_label",
         "title",
         "url",
         "verification"

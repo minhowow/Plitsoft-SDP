@@ -29,9 +29,14 @@ EVIDENCE_SHOWN = 5
 """기능마다 싣는 근거 수. 전체 수는 evidence_total 에 있다."""
 PLATFORM = {"web-ui", "mobile-app"}
 """화면·앱 자체를 뜻하는 기능. 이것만 있으면 서비스 기능(가입·결제 등)을 찾지 못한 것으로 본다."""
-_KIND_ORDER = {"package": 0, "import": 1, "call": 2, "path": 3, "screens": 4}
+_KIND_ORDER = {"package": 0, "import": 1, "call": 2, "url": 3, "path": 4, "screens": 5}
+MOBILE = {"react-native", "expo", "@capacitor/core", "@ionic/react", "@ionic/angular", "@ionic/vue", "cordova"}
+WEB = {"next", "nuxt", "vue", "svelte", "@sveltejs/kit", "@angular/core", "gatsby", "@remix-run/react", "astro", "vite",
+       "react-scripts", "preact", "solid-js"}  # fmt: skip
+"""웹 화면을 만드는 틀. react-dom 은 모바일 앱(Expo 의 웹 지원 등)에도 들어 있어, 모바일 틀이 없을 때만 웹으로 센다."""
+SERVER = {"express", "@nestjs/core", "fastify", "koa", "hono", "@hapi/hapi"}
 _WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]*|[a-z]+|\d+")
-_COMMENT = ("//", "/*", "*")
+_QUOTES = "'\"`"
 
 
 @cache
@@ -58,11 +63,74 @@ class Hit:
         what = {
             "package": f"package.json 의 dependencies 에 {self.value}",
             "import": f"{self.value} 를 불러옴",
-            "call": f"{self.value} 호출·주소",
+            "call": f"{self.value} 호출",
+            "url": f"주소 {self.value}",
             "path": f"경로 낱말 '{self.value}'",
             "screens": "화면 파일(JSX·TSX)",
         }[self.kind]
         return {"file": self.file, "line": self.line, "signal": self.kind, "value": self.value, "what": what}
+
+
+def code_only(text: str) -> str:
+    """JS·TS 글에서 문자열의 내용과 주석을 같은 길이의 빈칸으로 바꾼다(따옴표와 줄바꿈은 남긴다). 템플릿 문자열의
+    `${…}` 안은 코드다. 정규식 리터럴과 JSX 글은 따로 알아보지 않는다(드물게 한 줄이 덜 보인다)."""
+    out, i, n = list(text), 0, len(text)
+    mode: str | None = None  # None 코드 · 따옴표 문자열 · "//" · "/*"
+    depth: list[int] = []  # 열린 `${` 마다 그 안의 중괄호 깊이
+    while i < n:
+        ch = text[i]
+        if mode is None:
+            if ch in _QUOTES:
+                mode = ch
+            elif ch == "/" and text[i + 1 : i + 2] in ("/", "*"):
+                mode = "//" if text[i + 1] == "/" else "/*"
+                out[i] = out[i + 1] = " "
+                i += 2
+                continue
+            elif ch == "{" and depth:
+                depth[-1] += 1
+            elif ch == "}" and depth:
+                if depth[-1] == 0:
+                    depth.pop()
+                    mode = "`"
+                else:
+                    depth[-1] -= 1
+            i += 1
+            continue
+        if mode == "//":
+            if ch == "\n":
+                mode = None
+            else:
+                out[i] = " "
+            i += 1
+            continue
+        if mode == "/*":
+            if text[i : i + 2] == "*/":
+                out[i] = out[i + 1] = " "
+                mode = None
+                i += 2
+                continue
+            if ch != "\n":
+                out[i] = " "
+            i += 1
+            continue
+        if ch == "\\":
+            out[i] = " "
+            if i + 1 < n and text[i + 1] != "\n":
+                out[i + 1] = " "
+            i += 2
+            continue
+        if mode == "`" and text[i : i + 2] == "${":
+            depth.append(0)
+            mode = None
+            i += 2
+            continue
+        if ch == mode or (ch == "\n" and mode != "`"):
+            mode = None  # 닫는 따옴표, 또는 줄 끝까지 닫히지 않은 따옴표 문자열
+        elif ch != "\n":
+            out[i] = " "
+        i += 1
+    return "".join(out)
 
 
 def path_words(rel: str) -> set[str]:
@@ -94,6 +162,7 @@ class Matcher:
         self.packages: list[tuple[str, str]] = []  # (이름 또는 '범위/', 기능)
         self.paths: dict[str, list[str]] = {}
         self.calls: dict[str, list[str]] = {}
+        self.urls: dict[str, list[str]] = {}
         self.screens: list[str] = []
         for f in features:
             sig = f.get("signals") or {}
@@ -102,6 +171,8 @@ class Matcher:
                 self.paths.setdefault(w, []).append(f["id"])
             for c in sig.get("calls") or []:
                 self.calls.setdefault(c, []).append(f["id"])
+            for u in sig.get("urls") or []:
+                self.urls.setdefault(u, []).append(f["id"])
             if sig.get("screens"):
                 self.screens.append(f["id"])
         alts = [
@@ -109,6 +180,15 @@ class Matcher:
             for c in sorted(self.calls, key=len, reverse=True)
         ]
         self.call_re = re.compile(r"(?<![\w$])(?:" + "|".join(alts) + ")") if alts else None
+        # 주소는 문자열이 그 주소로 시작할 때만 센다(fetch("https://api.openai.com/…")). 문장 속 주소는 아니다
+        hosts = [
+            (re.escape(u) if u.endswith("://") else r"(?:https?://|wss?://)?" + re.escape(u))
+            for u in sorted(self.urls, key=len, reverse=True)
+        ]
+        self.url_re = re.compile(r"(?<=[\"'`])(" + "|".join(hosts) + ")") if hosts else None
+
+    def url_of(self, matched: str) -> str:
+        return next(u for u in sorted(self.urls, key=len, reverse=True) if matched.endswith(u) or matched == u)
 
     def package_features(self, name: str) -> list[str]:
         return [f for p, f in self.packages if name == p or (p.endswith("/") and name.startswith(p))]
@@ -126,19 +206,26 @@ def _package_jsons(root: Path):
             yield Path(dirpath) / "package.json"
 
 
-def scan(root: Path, m: Matcher) -> tuple[list[Hit], dict]:
+def scan(root: Path, m: Matcher) -> tuple[list[Hit], dict, dict]:
+    """(신호, 파일 수, 플랫폼을 가를 사실). 사실은 서비스 package.json 의 모든 의존성(dev 포함)과 서버 파일 수다."""
     hits: list[Hit] = []
     counts = {"source": 0, "service": 0, "test_or_config": 0, "package_json": 0}
+    facts: dict = {"deps": set(), "server_files": 0}
 
     for pj in sorted(_package_jsons(root)):
         rel = pj.relative_to(root).as_posix()
         try:
             text = pj.read_text(encoding="utf-8")
-            deps = json.loads(text).get("dependencies") or {}
+            doc = json.loads(text)
+            deps = doc.get("dependencies") or {}
         except (OSError, ValueError, AttributeError):
             continue
         counts["package_json"] += 1
         service = classify(rel, text) in SERVICE
+        if service:
+            for key in ("dependencies", "devDependencies"):
+                if isinstance(doc.get(key), dict):
+                    facts["deps"] |= set(doc[key])
         for name in deps if isinstance(deps, dict) else []:
             for feat in m.package_features(name):
                 hits.append(Hit(feat, "package", name, rel, _line_of(text, f'"{name}"'), service))
@@ -152,6 +239,7 @@ def scan(root: Path, m: Matcher) -> tuple[list[Hit], dict]:
             continue
         role = classify(rel, text)
         service = role in SERVICE
+        facts["server_files"] += role is Role.SERVER
         counts["source"] += 1
         counts["service" if service else "test_or_config"] += 1
         if role is Role.SCREEN:
@@ -163,13 +251,29 @@ def scan(root: Path, m: Matcher) -> tuple[list[Hit], dict]:
             if name:
                 line = text.count("\n", 0, mt.start()) + 1
                 hits += [Hit(f, "import", name, rel, line, service) for f in m.package_features(name)]
+        code = code_only(text)
         if m.call_re:
-            for n, line in enumerate(text.splitlines(), 1):
-                if line.lstrip().startswith(_COMMENT):
+            # 호출 모양은 문자열·주석 밖의 코드에서만 센다(웹 저장소의 사례 글 속 'openai.responses.create' 가 잡혔다)
+            for mt in m.call_re.finditer(code):
+                line = code.count("\n", 0, mt.start()) + 1
+                hits += [Hit(f, "call", mt.group(0), rel, line, service) for f in m.calls[mt.group(0)]]
+        if m.url_re:
+            for mt in m.url_re.finditer(text):
+                if code[mt.start() - 1] not in _QUOTES:  # 주석 안이다(주석은 따옴표까지 지운다)
                     continue
-                for mt in m.call_re.finditer(line):
-                    hits += [Hit(f, "call", mt.group(0), rel, n, service) for f in m.calls[mt.group(0)]]
-    return hits, counts
+                url, line = m.url_of(mt.group(1)), text.count("\n", 0, mt.start()) + 1
+                hits += [Hit(f, "url", url, rel, line, service) for f in m.urls[url]]
+    return hits, counts, facts
+
+
+def platforms(facts: dict, counts: dict, screens: bool) -> list[str]:
+    """web · mobile · server. 모바일 앱 틀이 있으면 웹 화면 틀(next·vite 등)이 따로 있을 때만 웹이다.
+    package.json 이 없는데 화면 파일이 있으면 웹으로 본다."""
+    deps = facts["deps"]
+    mobile = bool(deps & MOBILE)
+    web = bool(deps & WEB) or ("react-dom" in deps and not mobile) or (screens and not counts["package_json"])
+    server = bool(deps & SERVER) or facts["server_files"] > 0
+    return [p for p, on in (("web", web), ("mobile", mobile), ("server", server)) if on]
 
 
 def _duty_item(d: dict) -> dict:
@@ -207,7 +311,11 @@ def _evidence(hits: list[Hit]) -> list[dict]:
 def profile(root: Path) -> dict:
     spec = load_features()
     features = spec["features"]
-    hits, counts = scan(root, Matcher(features))
+    hits, counts, facts = scan(root, Matcher(features))
+    plats = platforms(facts, counts, any(h.kind == "screens" and h.service for h in hits))
+    if "web" not in plats:
+        # 웹이 아니면 화면 파일은 웹 화면 신호가 아니다(React Native 앱에 웹 접근성을 묻지 않는다)
+        hits = [h for h in hits if h.kind != "screens"]
     by_feature: dict[str, list[Hit]] = {}
     for h in hits:
         by_feature.setdefault(h.feature, []).append(h)
@@ -240,6 +348,7 @@ def profile(root: Path) -> dict:
         "profile_version": PROFILE_VERSION,
         "tool": {"name": "policypack", "version": __version__},
         "files": counts,
+        "platforms": plats,
         "service_features": len(service_features),
         "features": found,
     }

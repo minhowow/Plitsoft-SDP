@@ -59,7 +59,8 @@
         "judge-unparseable",
         "citation-rejected",
         "weak-unconfirmed",
-        "timeout"
+        "timeout",
+        "test-file"
       ]
     },
     "usage": {

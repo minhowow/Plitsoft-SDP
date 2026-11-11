@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -591,8 +592,17 @@ def _rejection(a: Answer, u: Unit, strict: bool) -> str:
     return classify(a.evidence, u.gate_code(), stripped=u.gate_stripped()).value
 
 
-def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judge: Judge | None = None) -> EvalResult:
+def evaluate(
+    pack: PolicyPack,
+    targets: list[Target],
+    static: StaticResult,
+    judge: Judge | None = None,
+    ask_ai: Callable[[Path], bool] | None = None,
+) -> EvalResult:
     """팩을 대상에 적용한다. `judge` 가 없으면 AI 에게 물어야 할 곳을 'AI 확인 필요'로 남긴다.
+
+    `ask_ai(파일)` 이 거짓인 파일(scan 은 시험·픽스처·설정 파일)은 판정자가 있어도 묻지 않고 판정자가 없을 때처럼 둔다
+    (까닭 test-file). 정책 팩 시험(packtest)은 넘기지 않는다 — 픽스처를 묻는 것이 그 일이다.
 
     함수 단위(scope: anchor) 판정은 판정자에게 그 구역의 줄과 같은 파일의 참고 줄만 보내고, 구역마다 따로
     묻는다. 파일 전체를 보내면 큰 파일 하나가 한 회차 사용량의 상당 부분을 먹는다. 적용 질문은 파일 전체로
@@ -710,13 +720,22 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
     # ── 2. AI 1단계: 적용이 '모름'일 때만 묻는다 ──────────────────────────
     # 물을 곳은 판정자와 무관하게 정한다. 판정자가 없으면(기본값 --judge none) 묻지 않고 'AI 필요'로
     # 남긴다. 적용은 '모름'으로 남아 불확실로 보고된다.
+    def offline(u: Unit) -> UntestedReason | None:
+        if judge is None:
+            return UntestedReason.NO_JUDGE
+        if ask_ai is not None and not ask_ai(u.target.path):
+            return UntestedReason.TEST_FILE
+        return None
+
     planned1 = [u for u in units if needs_applicability_question(u.applies, bool(u.rule.applies_ai))]
-    stage1 = planned1 if judge is not None else []
-    if judge is None:
-        for u in planned1:
+    stage1 = [u for u in planned1 if offline(u) is None]
+    for u in planned1:
+        why = offline(u)
+        if why is not None:
             u.pending.append("applies-ai")
-            u.add_reason(UntestedReason.NO_JUDGE)
-            u.trace.append("적용: AI 필요(판정자 없음) → unknown")
+            u.add_reason(why)
+            note = "판정자 없음" if why is UntestedReason.NO_JUDGE else "시험 파일, 묻지 않음"
+            u.trace.append(f"적용: AI 필요({note}) → unknown")
 
     def ask_applies(u: Unit) -> Answer:
         # 적용 여부는 파일 단위로 묻는다(구역 프롬프트여도). 적용 질문의 '아니오'는 인용 없이 규칙을
@@ -770,14 +789,16 @@ def evaluate(pack: PolicyPack, targets: list[Target], static: StaticResult, judg
     # ── 3. AI 2단계: 대안 ────────────────────────────────────────────────
     # 강한 정적 대안이 푼 곳과 물을 AI 대안이 없는 규칙은 묻지 않는다
     planned2 = [u for u in units if needs_alternative_questions(u.alts) and any(kind == "ai" for kind, _, _ in u.alts)]
-    stage2 = planned2 if judge is not None else []
-    if judge is None:
-        for u in planned2:
+    stage2 = [u for u in planned2 if offline(u) is None]
+    for u in planned2:
+        why = offline(u)
+        if why is not None:
             for kind, pred, _ in u.alts:
                 if kind == "ai":
                     u.pending.append(pred.id)
-                    u.unanswered.append((pred, "AI 필요(판정자 없음)"))
-            u.add_reason(UntestedReason.NO_JUDGE)
+                    note = "판정자 없음" if why is UntestedReason.NO_JUDGE else "시험 파일, 묻지 않음"
+                    u.unanswered.append((pred, f"AI 필요({note})"))
+            u.add_reason(why)
 
     def ask_alts(u: Unit) -> list[tuple[Predicate, Answer]]:
         # 구역이면 판정자는 그 구역과 같은 파일의 참고 줄만 본다. 근거 관문이 인용을 찾는 범위와 같다

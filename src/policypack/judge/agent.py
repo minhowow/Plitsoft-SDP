@@ -254,6 +254,23 @@ class RepoTools:
                         return self._out("\n".join(hits) + f"\n… ({SEARCH_HITS}개에서 자름)")
         return self._out("\n".join(hits)) or "(찾은 것 없음)"
 
+    def count(self, pattern: str, path: str = ".") -> int:
+        """search 와 같은 파일에서 맞는 줄 수(자르지 않는다). 모델이 "찾아봤는데 없다"고 한 검색을 관문이 다시 돌릴 때
+        쓴다. 저장소 밖 경로는 ValueError, 틀린 정규식은 re.error 다."""
+        rx = re.compile(pattern, re.I)
+        n = 0
+        for f in self._walk(self._path(path)):
+            if is_secret_file(f.relative_to(self.root).as_posix()):
+                continue
+            try:
+                if f.stat().st_size > FILE_MAX:
+                    continue
+                text = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            n += sum(1 for line in text.splitlines() if rx.search(line))
+        return n
+
     def call(self, name: str, args: dict) -> str:
         try:
             if name == "list_files":

@@ -8,8 +8,10 @@
 #             뜻이 갈리는 낱말은 쓰지 않는다: map(RoadMap·MindMap), chat(AI 챗봇), job(배치 작업), message(오류 문구),
 #             post(HTTP POST), review(코드 검토), ticket(표 모양 화면), video(화상 통화), doctor(점검 명령),
 #             prompt(확인 대화상자)
-#   calls     소스에 글자 그대로 있는 호출·주소 모양(앞뒤가 식별자 글자가 아닐 때). 주석 줄은 보지 않는다
-#   screens   화면 파일(JSX·TSX 를 그리는 파일, index/roles.py 의 screen)이 하나라도 있으면 맞는다
+#   calls     소스의 코드에 글자 그대로 있는 호출 모양(앞뒤가 식별자 글자가 아닐 때). 문자열·주석 안의 글자는 세지 않는다
+#   urls      문자열이 그 주소로 시작할 때(fetch("https://api.openai.com/…")). 문장 속에 나온 주소는 세지 않는다
+#   screens   화면 파일(JSX·TSX 를 그리는 파일, index/roles.py 의 screen)이 하나라도 있으면 맞는다. 저장소가 웹이 아니면
+#             (모바일 앱 틀만 있으면) 세지 않는다(profile.platforms)
 # 시험·픽스처·설정 파일(index/roles.py 의 test·config)의 신호는 기능으로 세지 않고 따로 낸다.
 #
 # 의무 붙이기 — 의무 지도의 의무(코드에 흔적이 남는 795개)마다 하나의 기능 또는 아래 두 묶음 가운데 하나에 붙는다.
@@ -178,8 +180,8 @@ features:
       packages: [openai, "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai", langchain, "@langchain/", ai,
                  "@ai-sdk/", replicate, "@huggingface/inference", cohere-ai, ollama, "@mistralai/mistralai", groq-sdk]
       paths: [ai, chatbot, gpt, llm]
-      calls: [chat.completions.create, responses.create, generateContent, api.openai.com, api.anthropic.com,
-              generativelanguage.googleapis.com]
+      calls: [chat.completions.create, responses.create, generateContent]
+      urls: [api.openai.com, api.anthropic.com, generativelanguage.googleapis.com]
     scope_notes: [생성형 AI, 고영향 AI, AI 합성물, AI 가상인물, 아동 챗봇, 자동화 결정, AI 음성·얼굴, 얼굴 합성]
 
   - id: external-transfer
@@ -188,7 +190,7 @@ features:
       packages: [openai, "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai", "@ai-sdk/", "@sentry/",
                  mixpanel-browser, "@amplitude/", amplitude-js, posthog-js, "@datadog/", logrocket, "@hotjar/",
                  "@sendgrid/mail", twilio, "@channel.io/", firebase, "@supabase/supabase-js", "@aws-sdk/", aws-sdk]
-      calls: [api.openai.com, api.anthropic.com, generativelanguage.googleapis.com]
+      urls: [api.openai.com, api.anthropic.com, generativelanguage.googleapis.com]
     scope_notes: [국외이전 동의]
     duties: [pipa-17-1, pipa-17-2, pipa-stdguide-7-3, pipa-26-2, pipa-28-8-1]
 
@@ -200,6 +202,8 @@ features:
                  react-facebook-pixel, "@analytics/"]
       paths: [analytics, tracking]
       calls: [gtag, fbq, dataLayer.push]
+      # 분석 스크립트는 흔히 문자열(인라인 스크립트)로 넣는다. 그 스크립트를 내려받는 주소로 센다
+      urls: [www.googletagmanager.com, googletagmanager.com, www.google-analytics.com, connect.facebook.net]
     scope_notes: [가명처리, 생기부 분석]
     duties: [pipa-18-1, pipa-18-3, pipa-decree-14-2-1]
 
@@ -224,7 +228,8 @@ features:
     signals:
       packages: [react-webcam, expo-camera, react-native-vision-camera, react-native-camera, expo-av]
       paths: [cctv, camera]
-      calls: [getUserMedia, MediaRecorder, "rtsp://"]
+      calls: [getUserMedia, MediaRecorder]
+      urls: ["rtsp://"]
     scope_notes: [CCTV 운영, 영상기기, 업무 촬영, 녹음]
 
   - id: media
@@ -258,7 +263,7 @@ features:
     name: 신용·금융 정보
     signals:
       paths: [loan, loans, credit, mydata, debt]
-      calls: [api.upbit.com, api.bithumb.com]
+      urls: [api.upbit.com, api.bithumb.com]
     scope_notes: [신용정보, 마이데이터, 마이데이터 수신, 전송 대리, 신용조회, 연체정보 등록, 채권 추심, 금융 자문, 가상자산 거래, 가상자산 시세]
 
   - id: health

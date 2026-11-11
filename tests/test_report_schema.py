@@ -145,3 +145,31 @@ def test_findings_carry_the_file_role(tmp_path, monkeypatch, capsys):
     aside = out.index("시험·픽스처·설정 파일의 발견 1건")
     assert out.index("src/signup.ts") < aside < out.index("tests/signup.test.ts")
     assert "그 가운데 시험·픽스처·설정 파일의 발견 1건" in out
+
+
+def test_the_judge_is_not_asked_about_test_files(tmp_path, monkeypatch, capsys):
+    """시험·픽스처 파일의 경고는 판정자에게 묻지 않는다(판정자가 없을 때처럼 남고 까닭은 test-file). 정책 팩 픽스처가
+    많은 저장소에서 질문이 수백 개로 늘어 웹 실행기의 검사가 12분 걸렸다(11/11)."""
+    import policypack.judge.anthropic_api as api
+    from policypack.cli import main
+
+    asked = []
+
+    class Recording(FakeJudge):
+        def ask(self, q):
+            asked.append(q.code)
+            return super().ask(q)
+
+    monkeypatch.setattr(api, "build", lambda spec, **kw: Recording("예", echo_first_line=True))
+    monkeypatch.setattr(api, "preflight", lambda spec: None)
+    monkeypatch.chdir(tmp_path)
+    for name in ("src/signup.ts", "tests/signup.test.ts"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(FIX / "pipa-22-2" / "violating.ts", tmp_path / name)
+    main(["scan", str(tmp_path), "--judge", "anthropic:haiku", "--output-format", "json", "--exit-zero"])
+    doc = json.loads(capsys.readouterr().out)
+    check(doc)
+    assert asked  # 서비스 코드는 묻는다
+    by_role = {f["role"]: f for f in doc["findings"]}
+    assert "test-file" in by_role["test"]["untested_reasons"] and by_role["test"]["ai_pending"]
+    assert "test-file" not in by_role.get("other", {}).get("untested_reasons", [])

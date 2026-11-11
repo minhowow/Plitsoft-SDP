@@ -159,6 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--concurrency", type=int, default=6, help="동시에 묻는 질문 수(429 를 받으면 줄인다, 기본 6)")
     rv.add_argument("--no-static", action="store_true", help="내장 정책 팩의 정적 검사를 돌리지 않는다")
     rv.add_argument("--plan", action="store_true", help="모델을 부르지 않고 물을 의무와 질문 수만 낸다")
+    rv.add_argument(
+        "--reuse",
+        default=None,
+        metavar="REVIEW_JSON",
+        help="같은 저장소·커밋의 앞 review 결과. 이해 단계(서비스 요약·기능·개인정보 흐름)를 묻지 않고 그대로 쓴다",
+    )
 
     t = sub.add_parser("test", help="정책 팩의 픽스처로 기대 판정을 확인한다 (모델 호출 0회)")
     t.add_argument("paths", nargs="*", help="팩 디렉터리·tests·*.test.yaml 경로 (기본: 내장 팩의 tests)")
@@ -642,7 +648,17 @@ def cmd_scan(args) -> int:
     _warn_engine_errors(static.engine, static.unlocated_errors)
 
     # 판정자가 없거나 답하지 못하면 AI 에게 물어야 했던 곳을 보고서가 'AI 확인 필요'로 알린다(요약 줄·JSON·SARIF).
-    result = evaluate(pack, targets, static, judge=judge)
+    # 시험·픽스처·설정 파일은 판정자에게 묻지 않는다(그 경고는 판정자가 없을 때처럼 남는다). 정책 팩 픽스처 310개가 있는
+    # CLI 저장소에서 질문이 300개를 넘어 웹 실행기의 검사가 12분 걸렸다(11/11)
+    ask_ai = None
+    if judge is not None:
+        from policypack.index.roles import SERVICE, file_role
+        from policypack.report.paths import rel
+
+        def ask_ai(p: Path) -> bool:
+            return file_role(rel(p, root), p) in SERVICE
+
+    result = evaluate(pack, targets, static, judge=judge, ask_ai=ask_ai)
     result.skipped = [str(p) for p in found.skipped_files()]
     result.questions_sent = getattr(judge, "sent", 0)
     result.questions_skipped = getattr(judge, "skipped", 0)
@@ -852,8 +868,19 @@ def cmd_review(args) -> int:
         f"상한 ${args.max_usd:g}·{args.time_limit:g}초",
         file=sys.stderr,
     )
+    reuse = None
+    if args.reuse:
+        try:
+            reuse = json.loads(Path(args.reuse).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise ConfigError(f"--reuse 파일을 읽지 못했습니다: {e}") from e
+        before, now = (reuse.get("profile") or {}).get("commit"), rv.commit_of(root.resolve())
+        if before and now and before != now:
+            print(f"알림: --reuse 의 커밋({before[:12]})과 지금 커밋({now[:12]})이 다릅니다", file=sys.stderr)
     limits = rv.Limits(args.max_usd, args.time_limit, args.concurrency, args.batch)
-    doc = rv.review(root, investigator, checker, limits, use_static=not args.no_static, throttles=throttles)
+    doc = rv.review(
+        root, investigator, checker, limits, use_static=not args.no_static, throttles=throttles, reuse=reuse
+    )
     print(json.dumps(doc, ensure_ascii=False, indent=2))
     return EXIT_OK
 

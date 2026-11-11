@@ -35,6 +35,8 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 
 `run.judge`(실제 모델 id), `run.judge_usage`(토큰 합), `run.judge_masked`(보내기 전에 가린 비밀값 수, 종류별. 가린 것이
 있을 때만), `questions_sent`·`questions_skipped`.
+시험·픽스처·설정 파일(`findings[].role` 이 test·config)은 판정자에게 묻지 않는다. 그 경고는 판정자가 없을 때와 같이 남고
+`untested_reasons` 에 `test-file` 이 붙는다(11/11: 정책 팩 픽스처 310개가 있는 저장소에서 질문 367개 → 0개).
 
 ## 에이전트 검토(`--agent`)의 키
 
@@ -79,35 +81,50 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 
 | 키 | 뜻 |
 |---|---|
-| `features[]` | 감지된 기능(`id`, `name`). `evidence[]` 는 근거 파일·줄·신호 종류(`package`·`import`·`call`·`path`·`screens`)·본 것, 앞의 5개만 싣고 전체 수는 `evidence_total` |
+| `features[]` | 감지된 기능(`id`, `name`). `evidence[]` 는 근거 파일·줄·신호 종류(`package`·`import`·`call`·`url`·`path`·`screens`. `call` 은 문자열·주석 밖의 코드에서만, `url` 은 문자열이 그 주소로 시작할 때만 센다)·본 것, 앞의 5개만 싣고 전체 수는 `evidence_total` |
 | `features[].duties` | 그 기능에 붙은 의무 `count`, 검토 층 후보 수 `review_candidates`, `items[]`(id, 법, 조문, 제목, 의무 한 줄, 법제처 링크, 후보 여부, 조문 인용 대조 결과) |
 | `service_features` | 화면·앱(`web-ui`·`mobile-app`)을 뺀 기능 수. 0 이면 `note` 가 그 사실을 적고 `common` 이 없다 |
 | `common` | 거의 모든 서비스에 걸리는 의무(처리방침·안전조치 등). 서비스 기능이 하나라도 있을 때만 |
 | `status` | 운영 주체의 지위(공공기관·금융회사 등)로 걸리는 의무 수. 코드로 가리지 않아 목록은 싣지 않는다 |
 | `test_only[]` | 시험·픽스처·설정 파일에서만 본 기능 신호. 기능으로 세지 않는다 |
 | `files`, `totals` | 본 파일 수(서비스 코드 / 시험·설정, package.json), 기능·의무·후보 합계 |
+| `platforms` | web·mobile·server. 모바일 앱 틀(react-native·expo 등)만 있으면 화면 파일이 있어도 웹이 아니어서 `web-ui` 기능이 없다 |
 
 기능과 신호는 `src/policypack/profile/features.yaml`, 기능–의무 표는 `src/policypack/profile/duties.jsonl`(만드는 법은
 `scripts/lawmap_table.py`)에 있다.
 
 ## 저장소 검토(`policypack review <폴더>`, 11/11 부터)
 
-스키마는 [`schemas/review-1.json`](../schemas/review-1.json), `review_version` 은 1(키를 더할 때는 그대로)이다.
+스키마는 [`schemas/review-2.json`](../schemas/review-2.json), `review_version` 은 2 다(1 에서 '확인할 것'을 세 갈래로 나누고
+부재 증명을 더해 판을 올렸다. 키를 더할 때는 그대로).
 조사 모델(`--model`, 기본 haiku)이 저장소를 읽고, 다른 모델(`--checker`, 기본 sonnet)이 반박한다. 질문은 기본으로
-의무 하나씩이다(`--batch duty`; `feature` 는 기능 하나에 의무 8개까지 묶어 싸다). 모델이 읽은 파일의
-코드가 밖으로 나간다(비밀값은 가리고 .env 등은 읽지 않는다). `--plan` 은 모델 없이 물을 의무와 질문 수만 낸다.
+의무 하나씩이다(`--batch duty`; `feature` 는 기능 하나에 의무 8개까지 묶어 싸다). 모델이 읽은 파일의 코드가 밖으로
+나간다(비밀값은 가리고 .env 등은 읽지 않는다). `--plan` 은 모델 없이 물을 의무와 질문 수만 낸다. `--reuse <앞 결과>` 는
+같은 저장소·커밋의 앞 결과에서 이해 단계(요약·기능·개인정보 흐름)를 되살려 묻지 않는다(인용은 관문에 다시 건다).
 
 | 키 | 뜻 |
 |---|---|
-| `profile` | 서비스 요약(`summary`), 기능(`sources`: signal·model·static, 모델이 더한 근거 `model_citations`, 인용과 함께 뺀 것은 `removed`) |
+| `summary` | 체크리스트의 갈래별 수(`counts`), 갈래 이름(`labels`), 맨 위 다섯 건의 의무 id(`top`) |
+| `profile` | 커밋(`commit`), 플랫폼(`platforms`: web·mobile·server), 서비스 요약, 기능(`sources`: signal·model·static, 모델이 더한 근거 `model_citations`, 인용과 함께 뺀 것은 `removed`) |
 | `data_flow` | 개인정보 흐름. `nodes[]`(input·server·store·external, 다루는 항목 `data`, 인용) 와 `edges[]`(from→to). 인용이 관문을 통과한 것만 |
 | `obligations.listed[]` | 목록 층: 감지된 기능과 거의 모든 서비스에 걸릴 수 있는 의무. `in_checklist` 는 검토 층에 들었는지 |
-| `checklist[]` | 검토 층: 의무마다 `status`(evidence-found 충족 근거 있음 · to-check 확인할 것 · not-applicable 해당 없음 · unknown 모름), 인용, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 결과 `verification`(upheld · overturned · overturn-ungrounded · not-run), 내장 팩 정적 결과 `static` |
-| `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(보수 단가), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 못 물은 의무(`not_asked`: cost-cap·time-cap·no-answer·parse), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
+| `checklist[]` | 검토 층. 이미 갈래 순으로 늘어서 있고 `rank` 가 1 부터다. 의무마다 `status`·`status_label`, 인용 `citations`, 부재를 보인 검색 `searches`, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 `verification`(upheld · overturned · overturn-ungrounded · not-run, 조문 밖 요건이었는지 `off_quote`), 내장 팩 정적 결과 `static` |
+| `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(보수 단가), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 검색과 다시 돌려 맞지 않은 수, 못 물은 의무(`not_asked`), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
 
-- '충족 근거 있음'·'해당 없음'은 인용이 관문을 통과하고 시험·설정 파일의 줄이 아닐 때만 남는다. 아니면 '확인할 것'이다.
-- 반박이 '뒤집음'이라 해도 인용이 관문을 통과하지 못하면 받지 않는다(`overturn-ungrounded`, 상태는 그대로).
-- 상한에 걸려 묻지 못한 의무도 `checklist` 에 '모름'으로 남고 `not_answered` 에 까닭이 있다.
+상태(갈래 순):
+
+| status | 이름 | 받는 조건 |
+|---|---|---|
+| `seen-in-code` | 확인할 것 — 코드에서 본 것 | 의무가 걸리는 처리의 인용이 관문을 통과했다. 지킨 근거는 찾지 못했다 |
+| `check-outside` | 확인할 것 — 저장소 밖에서 | 배포 설정·처리방침·저장소에 없는 서버를 봐야 한다. 인용이 관문을 통과하지 못한 '코드에서 본 것'·'충족'도 여기로 온다 |
+| `check-applicability` | 확인할 것 — 해당 여부부터 | 걸리는지가 사업자의 판단이다(고영향 AI, 사내 도구, 업종). 반박하지 않는다 |
+| `unknown` | 모름(묻지 못함) | 상한·실패로 답이 없다. `not_answered` 에 까닭 |
+| `evidence-found` | 충족 근거 있음 | 조문의 요건을 지킨 줄의 인용이 관문을 통과했다 |
+| `likely-not-applicable` | 걸리지 않는 것으로 보임(확인 안 됨) | 모델은 해당 없음이라 했지만 검색 증명이 없거나 맞지 않았다. 확인 목록에 올리지 않는다 |
+| `not-applicable` | 해당 없음(검색으로 확인) | 모델이 낸 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같았다 |
+
+- 인용은 시험·설정 파일의 줄이면 받지 않는다. 질문에 넣는 요건은 조문 인용에 있는 것만이다.
+- 반박이 뒤집을 때도 같은 조건(있다는 말은 인용, 없다는 말은 검색)을 넘어야 받는다.
 
 ## 아직 없는 것
 
