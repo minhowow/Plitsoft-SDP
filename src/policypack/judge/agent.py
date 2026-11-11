@@ -461,16 +461,42 @@ class AgentJudge:
         return min(self.budget + self.BUDGET_PER_ENTRY * max(0, len(q.entries) - 1), self.budget * 2)
 
     def ask(self, q: AgentQuestion, root: Path) -> AgentAnswer:
-        tools = RepoTools(root)
         budget = self.budget_for(q)
-        messages: list = [{"role": "user", "content": q.prompt(budget)}]
+        text, ans = self.converse(q.prompt(budget), root, budget)
+        if ans.failure:
+            return ans
+        doc = parse(text)
+        if doc is None:
+            ans.failure = "parse"
+            return ans
+        ans.partial = bool(doc.get("partial"))
+        for r in doc["results"]:
+            if not isinstance(r, dict) or not isinstance(r.get("entry"), str) or r.get("verdict") not in VERDICTS:
+                continue
+            line = r.get("line")
+            ans.results.append(
+                EntryResult(
+                    entry=r["entry"].removeprefix("./"),
+                    verdict=VERDICTS[r["verdict"]],
+                    citations=[c for c in r.get("citations") or [] if isinstance(c, dict)],
+                    reason=str(r.get("reason") or ""),
+                    line=line if isinstance(line, int) else None,
+                )
+            )
+        return ans
+
+    def converse(self, prompt: str, root: Path, budget: int) -> tuple[str, AgentAnswer]:
+        """도구를 쓰는 대화 하나. 마지막 답의 글과, 호출 수·사용량·보낸 것·실패를 담은 AgentAnswer 를 돌려준다.
+        답의 해석은 부르는 쪽이 한다(ask 는 진입 파일별 결과, review 는 의무별 결과)."""
+        tools = RepoTools(root)
+        messages: list = [{"role": "user", "content": prompt}]
         ans = AgentAnswer(budget=budget)
         reason = "unreachable" if self._down >= self.GIVE_UP_AFTER else "time" if self._late() else None
         if reason:
             self.skipped += 1
             self.skip_reasons[reason] = self.skip_reasons.get(reason, 0) + 1
             ans.failure = "transport: skipped" if reason == "unreachable" else "time: skipped"
-            return ans
+            return "", ans
         text = ""
         for _ in range(self.max_turns):
             if ans.calls and self._late():
@@ -521,28 +547,9 @@ class AgentJudge:
             ans.failure = "turns"
         ans.read_files, ans.searches, ans.masked = tools.read, tools.searched, tools.masked
         ans.matched_files, ans.listed, ans.refused = tools.matched, tools.listed, tools.refused
-        if ans.failure:
-            return ans
-        ans.raw = text[:2000]
-        doc = parse(text)
-        if doc is None:
-            ans.failure = "parse"
-            return ans
-        ans.partial = bool(doc.get("partial"))
-        for r in doc["results"]:
-            if not isinstance(r, dict) or not isinstance(r.get("entry"), str) or r.get("verdict") not in VERDICTS:
-                continue
-            line = r.get("line")
-            ans.results.append(
-                EntryResult(
-                    entry=r["entry"].removeprefix("./"),
-                    verdict=VERDICTS[r["verdict"]],
-                    citations=[c for c in r.get("citations") or [] if isinstance(c, dict)],
-                    reason=str(r.get("reason") or ""),
-                    line=line if isinstance(line, int) else None,
-                )
-            )
-        return ans
+        if not ans.failure:
+            ans.raw = text[:2000]
+        return text, ans
 
 
 def build(spec: str, budget: int = 20, env: dict | None = None) -> AgentJudge:

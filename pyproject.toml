@@ -52,3 +52,4 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # 판정자에게 보내는 프롬프트는 원문 그대로 유지한다. 줄을 자르면 모델 입력이 달라진다.
 "src/policypack/judge/base.py" = ["E501"]
+"src/policypack/review/prompts.py" = ["E501"]

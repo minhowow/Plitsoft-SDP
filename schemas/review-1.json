@@ -1,0 +1,979 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://policypack.dev/schemas/review-1.json",
+  "title": "policypack review 보고서",
+  "description": "policypack review <저장소> 의 JSON. 키를 더할 때는 review_version 을 올리지 않는다. 받는 쪽은 모르는 키를 무시한다.",
+  "type": "object",
+  "properties": {
+    "review_version": {
+      "const": 1
+    },
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "const": "policypack"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feature"
+          }
+        },
+        "test_only": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/evidence"
+                }
+              },
+              "evidence_total": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "evidence",
+              "evidence_total",
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "files": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "service": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "test_or_config": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "package_json": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "package_json",
+            "service",
+            "source",
+            "test_or_config"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "features",
+        "files",
+        "summary",
+        "test_only"
+      ],
+      "additionalProperties": false
+    },
+    "data_flow": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "input",
+                  "server",
+                  "store",
+                  "external"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "citations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              }
+            },
+            "required": [
+              "citations",
+              "data",
+              "id",
+              "kind",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "citations": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/citation"
+                }
+              }
+            },
+            "required": [
+              "citations",
+              "data",
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "edges",
+        "nodes"
+      ],
+      "additionalProperties": false,
+      "description": "개인정보 흐름. 마디(input·server·store·external)와 화살표, 모두 관문을 통과한 인용이 있는 것만"
+    },
+    "obligations": {
+      "type": "object",
+      "properties": {
+        "listed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "feature": {
+                "type": "string"
+              },
+              "law": {
+                "type": "string"
+              },
+              "article": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "duty": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "in_checklist": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "article",
+              "duty",
+              "feature",
+              "id",
+              "in_checklist",
+              "law",
+              "title",
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "status_only": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "listed",
+        "status_only"
+      ],
+      "additionalProperties": false,
+      "description": "목록 층: 감지된 기능(과 거의 모든 서비스)에 걸릴 수 있는 의무. 판단하지 않는다"
+    },
+    "checklist": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "models": {
+          "type": "object",
+          "properties": {
+            "investigate": {
+              "type": "string"
+            },
+            "verify": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "investigate",
+            "verify"
+          ],
+          "additionalProperties": false
+        },
+        "batch": {
+          "enum": [
+            "feature",
+            "duty"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "concurrency": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "concurrency",
+            "seconds",
+            "usd"
+          ],
+          "additionalProperties": false
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/usage"
+          }
+        },
+        "usd_estimate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "concurrency": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "rate_limited": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "end",
+              "rate_limited",
+              "start"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "status_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "verification_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "citations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "citations_rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "understanding": {
+          "type": "object",
+          "properties": {
+            "answered": {
+              "type": "boolean"
+            },
+            "rejected_claims": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "answered",
+            "rejected_claims"
+          ],
+          "additionalProperties": false
+        },
+        "not_asked": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "masked": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "static": {
+          "type": "object",
+          "properties": {
+            "ran": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "duties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "duties",
+            "error",
+            "ran"
+          ],
+          "additionalProperties": false
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/question"
+          }
+        }
+      },
+      "required": [
+        "batch",
+        "calls",
+        "citations",
+        "citations_rejected",
+        "concurrency",
+        "limits",
+        "masked",
+        "models",
+        "not_asked",
+        "questions",
+        "refused",
+        "seconds",
+        "static",
+        "status_counts",
+        "understanding",
+        "usage",
+        "usd_estimate",
+        "verification_counts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "checklist",
+    "data_flow",
+    "obligations",
+    "profile",
+    "review_version",
+    "run",
+    "tool"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "why": {
+          "enum": [
+            "grounded",
+            "outside-repo",
+            "no-such-file",
+            "not-found",
+            "comment-only",
+            "trailing-comment",
+            "too-short",
+            "bare-word",
+            "empty",
+            "test-file",
+            "not-entry-file"
+          ]
+        },
+        "line_model": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "ok",
+        "text",
+        "why"
+      ],
+      "additionalProperties": false,
+      "description": "모델이 댄 인용과 관문 결과. ok 인 인용의 line 은 관문이 코드에서 다시 구한 줄이다"
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signal": {
+          "enum": [
+            "package",
+            "import",
+            "call",
+            "path",
+            "screens"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "what": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "signal",
+        "value",
+        "what"
+      ],
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "static": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "outcome",
+        "policy",
+        "rule"
+      ],
+      "additionalProperties": false
+    },
+    "feature": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "signal",
+              "model",
+              "static"
+            ]
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "evidence_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model_citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "model_reason": {
+          "type": "string"
+        },
+        "removed": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "citations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/citation"
+              }
+            }
+          },
+          "required": [
+            "citations",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "evidence",
+        "evidence_total",
+        "id",
+        "model_citations",
+        "name",
+        "sources"
+      ],
+      "additionalProperties": false,
+      "description": "sources: signal(규칙 신호) · model(이해 단계가 인용과 함께 더함) · static(내장 팩 정적 검사). removed 가 있으면 이해 단계가 인용과 함께 뺀 기능이다"
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "enum": [
+            "upheld",
+            "overturned",
+            "overturn-ungrounded",
+            "not-run"
+          ]
+        },
+        "why": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "evidence-found",
+            "to-check",
+            "not-applicable",
+            "unknown"
+          ]
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "additionalProperties": false,
+      "description": "반박 검증. overturned 면 checklist 항목의 status·citations 가 이 값이다. overturn-ungrounded 는 뒤집는 답의 인용이 관문을 통과하지 못해 받지 않은 것"
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "duty": {
+          "type": "string"
+        },
+        "feature": {
+          "type": "string"
+        },
+        "law": {
+          "type": "string"
+        },
+        "article": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "duty_text": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "krcore": {
+          "type": "boolean"
+        },
+        "static": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/static"
+          }
+        },
+        "status": {
+          "enum": [
+            "evidence-found",
+            "to-check",
+            "not-applicable",
+            "unknown"
+          ]
+        },
+        "asked": {
+          "type": "boolean"
+        },
+        "not_answered": {
+          "type": "string"
+        },
+        "first": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "answered": {
+                  "enum": [
+                    "evidence-found",
+                    "to-check",
+                    "not-applicable",
+                    "unknown"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "evidence-found",
+                    "to-check",
+                    "not-applicable",
+                    "unknown"
+                  ]
+                },
+                "citations": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/citation"
+                  }
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "question": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "answered",
+                "citations",
+                "question",
+                "reason",
+                "status"
+              ],
+              "additionalProperties": false,
+              "description": "조사 모델의 답. answered 는 모델이 말한 상태, status 는 관문을 거친 상태"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verification": {
+          "$ref": "#/$defs/verification"
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "question": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "article",
+        "asked",
+        "citations",
+        "duty",
+        "duty_text",
+        "feature",
+        "first",
+        "krcore",
+        "law",
+        "question",
+        "quote",
+        "reason",
+        "static",
+        "status",
+        "title",
+        "url",
+        "verification"
+      ],
+      "additionalProperties": false
+    },
+    "question": {
+      "type": "object",
+      "properties": {
+        "n": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage": {
+          "enum": [
+            "understand",
+            "investigate",
+            "rebut"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "feature": {
+          "type": "string"
+        },
+        "duties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failure": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started": {
+          "type": "number",
+          "minimum": 0
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "usage": {
+          "$ref": "#/$defs/usage"
+        },
+        "usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sent": {
+          "type": "object",
+          "properties": {
+            "read": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "searches": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "matched": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "listed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "refused": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "masked": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "required": [
+            "listed",
+            "masked",
+            "matched",
+            "read",
+            "refused",
+            "searches"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "failure",
+        "model",
+        "n",
+        "stage"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

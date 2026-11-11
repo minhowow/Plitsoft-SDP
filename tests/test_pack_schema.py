@@ -462,8 +462,10 @@ def test_committed_schemas_match_the_model_and_nothing_else_is_there():
     from policypack.cli import SCHEMAS, main
 
     assert main(["schema", "--check"]) == 0
-    # report-1.json 은 손으로 쓴 보고서 스키마다(모델이 없다). tests/test_report_schema.py 가 실제 보고서로 검사한다
-    assert sorted(p.name for p in (REPO / "schemas").glob("*.json")) == sorted([*SCHEMAS, "report-1.json"])
+    # report-1.json·review-1.json 은 손으로 쓴 보고서 스키마다(모델이 없다). tests/test_report_schema.py 와
+    # tests/test_review.py 가 실제 보고서로 검사한다
+    handwritten = ["report-1.json", "review-1.json"]
+    assert sorted(p.name for p in (REPO / "schemas").glob("*.json")) == sorted([*SCHEMAS, *handwritten])
 
 
 def test_doctor_finds_the_engine(capsys):

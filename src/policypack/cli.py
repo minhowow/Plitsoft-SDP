@@ -141,6 +141,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pr.add_argument("path", help="저장소 폴더")
 
+    rv = sub.add_parser(
+        "review",
+        help="저장소를 읽어 서비스·개인정보 흐름·걸리는 의무를 정리하고, 의무마다 근거를 찾아 체크리스트를 낸다(JSON)",
+    )
+    rv.add_argument("path", help="저장소 폴더")
+    rv.add_argument("--model", default="anthropic:claude-haiku-5-5", help="이해·근거 찾기 모델")
+    rv.add_argument("--checker", default="anthropic:claude-sonnet-5-5", help="반박 검증 모델(다른 모델을 쓴다)")
+    rv.add_argument(
+        "--batch",
+        default="feature",
+        choices=["feature", "duty"],
+        help="질문 하나에 기능 하나(의무 8개까지) 또는 의무 하나",
+    )
+    rv.add_argument("--max-usd", type=float, default=5.0, help="저장소 한 번의 어림 금액 상한(보수 단가, 기본 5)")
+    rv.add_argument("--time-limit", type=float, default=360.0, help="저장소 한 번의 시간 상한(초, 기본 360)")
+    rv.add_argument("--concurrency", type=int, default=4, help="동시에 묻는 질문 수(429 를 받으면 줄인다, 기본 4)")
+    rv.add_argument("--no-static", action="store_true", help="내장 정책 팩의 정적 검사를 돌리지 않는다")
+    rv.add_argument("--plan", action="store_true", help="모델을 부르지 않고 물을 의무와 질문 수만 낸다")
+
     t = sub.add_parser("test", help="정책 팩의 픽스처로 기대 판정을 확인한다 (모델 호출 0회)")
     t.add_argument("paths", nargs="*", help="팩 디렉터리·tests·*.test.yaml 경로 (기본: 내장 팩의 tests)")
     t.add_argument("--config", default=None, help="정책 팩 경로 (기본: 경로 안의 팩, 없으면 내장 kr-core)")
@@ -808,9 +827,41 @@ def cmd_profile(args) -> int:
     return EXIT_OK
 
 
+def cmd_review(args) -> int:
+    from policypack import review as rv
+
+    root = Path(args.path)
+    if not root.is_dir():
+        raise ConfigError(f"폴더가 아닙니다: {args.path}")
+    if args.plan:
+        print(json.dumps(rv.plan(root, use_static=not args.no_static), ensure_ascii=False, indent=2))
+        return EXIT_OK
+    if args.max_usd <= 0 or args.time_limit <= 0 or args.concurrency < 1:
+        raise ConfigError("--max-usd·--time-limit 는 0 보다, --concurrency 는 1 이상이어야 합니다")
+    throttles = (rv.Throttle(args.concurrency), rv.Throttle(args.concurrency))
+    try:
+        investigator = rv.build_judge(args.model, throttles[0])
+        checker = rv.build_judge(args.checker, throttles[1])
+    except ValueError as e:
+        raise ConfigError(str(e)) from e
+    from policypack.judge.http import endpoint
+
+    print(
+        f"검토({args.model}, 반박 {args.checker}, 묶음 {args.batch}): 모델이 읽은 파일의 코드가 "
+        f"{_redact(endpoint())} 로 나갑니다(비밀값은 가리고 .env 등은 읽지 않음). "
+        f"상한 ${args.max_usd:g}·{args.time_limit:g}초",
+        file=sys.stderr,
+    )
+    limits = rv.Limits(args.max_usd, args.time_limit, args.concurrency, args.batch)
+    doc = rv.review(root, investigator, checker, limits, use_static=not args.no_static, throttles=throttles)
+    print(json.dumps(doc, ensure_ascii=False, indent=2))
+    return EXIT_OK
+
+
 COMMANDS = {
     "scan": cmd_scan,
     "profile": cmd_profile,
+    "review": cmd_review,
     "validate": cmd_validate,
     "schema": cmd_schema,
     "doctor": cmd_doctor,

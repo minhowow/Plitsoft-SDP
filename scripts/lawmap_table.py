@@ -20,6 +20,7 @@
   no-source 그 법령 id 의 원문 파일이 없다
 
 검토 층 후보 = 대조 pass · confidence high · scope general 또는 domain · 기능이 있다('지위'가 아니다).
+검토 층 후보와 내장 팩(kr-core)이 다루는 의무에는 질문에 넣을 글(걸리는 신호·위반 모양·지킨 모양·주체)을 함께 싣는다.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 REPO = Path(__file__).resolve().parents[1]
+PACK = REPO / "policies" / "kr-core" / "pack.yaml"
 FEATURES = REPO / "src" / "policypack" / "profile" / "features.yaml"
 TABLE = REPO / "src" / "policypack" / "profile" / "duties.jsonl"
 CSV_OUT = REPO / "lawmap" / "review-candidates.csv"
@@ -125,6 +127,9 @@ def main(argv: list[str]) -> int:
     stray = sorted(set(by_id) - known)
     assert not stray, f"의무 지도에 없는 id: {stray}"
 
+    from policypack.pack.loader import load_pack
+
+    krcore = {d for p in load_pack(PACK).policies for d in p.duties}
     raw, cache, rows, unmapped = lawmap / "raw", {}, [], []
     for d in duties:
         feature = assign(d, by_id, by_note)
@@ -134,6 +139,10 @@ def main(argv: list[str]) -> int:
         if d["scope"] == "sector" and d["id"] in by_id:
             print(f"알림: {d['id']} 는 scope sector 라 '지위'로 둡니다(features.yaml 의 {by_id[d['id']]} 대신)")
         check, how = check_quote(d["quote"], _source(raw, d["law_id"], cache))
+        candidate = (
+            check == "pass" and d["confidence"] == "high" and d["scope"] in ("general", "domain") and feature != STATUS
+        )
+        asked = candidate or d["id"] in krcore
         rows.append(
             {
                 "id": d["id"],
@@ -152,10 +161,18 @@ def main(argv: list[str]) -> int:
                 "quote": d["quote"],
                 "quote_check": check,
                 "quote_how": how,
-                "review_candidate": check == "pass"
-                and d["confidence"] == "high"
-                and d["scope"] in ("general", "domain")
-                and feature != STATUS,
+                "review_candidate": candidate,
+                "krcore": d["id"] in krcore,
+                **(
+                    {
+                        "addressee": d["addressee"],
+                        "trigger": d["trigger_ko"],
+                        "violation_shapes": d["violation_shapes_ko"],
+                        "compliant_shapes": d["compliant_shapes_ko"],
+                    }
+                    if asked
+                    else {}
+                ),
             }
         )
     if unmapped:

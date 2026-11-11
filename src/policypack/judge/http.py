@@ -37,7 +37,14 @@ def endpoint(env: dict | None = None) -> str:
     return base.rstrip("/") + "/v1/messages"
 
 
-def http_transport(key: str, timeout: float = 300.0, url: str | None = None, sleep=time.sleep) -> Transport:
+def http_transport(
+    key: str,
+    timeout: float = 300.0,
+    url: str | None = None,
+    sleep=time.sleep,
+    on_retry: Callable[[int], None] | None = None,
+) -> Transport:
+    """`on_retry(상태 코드)` 는 다시 보내기 전에 불린다. 동시에 여럿을 보내는 쪽이 429 를 보고 줄이는 데 쓴다."""
     url = url or endpoint()
 
     def send(body: dict) -> dict:
@@ -54,6 +61,8 @@ def http_transport(key: str, timeout: float = 300.0, url: str | None = None, sle
             except urllib.error.HTTPError as e:
                 detail = e.read().decode(errors="replace")
                 if e.code in RETRY and attempt < 4:
+                    if on_retry:
+                        on_retry(e.code)
                     sleep(10 * (attempt + 1))
                     continue
                 kind = Unavailable if e.code in RETRY or e.code in DEAD else RuntimeError
