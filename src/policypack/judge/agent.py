@@ -485,7 +485,7 @@ class AgentJudge:
             )
         return ans
 
-    def converse(self, prompt: str, root: Path, budget: int) -> tuple[str, AgentAnswer]:
+    def converse(self, prompt: str, root: Path, budget: int, max_tokens: int = MAX_TOKENS) -> tuple[str, AgentAnswer]:
         """도구를 쓰는 대화 하나. 마지막 답의 글과, 호출 수·사용량·보낸 것·실패를 담은 AgentAnswer 를 돌려준다.
         답의 해석은 부르는 쪽이 한다(ask 는 진입 파일별 결과, review 는 의무별 결과)."""
         tools = RepoTools(root)
@@ -504,7 +504,7 @@ class AgentJudge:
                 break
             body = {
                 "model": self.model,
-                "max_tokens": MAX_TOKENS,
+                "max_tokens": max_tokens,
                 "system": SYSTEM,
                 "messages": _cached(messages),
                 "tools": TOOLS,
@@ -534,17 +534,18 @@ class AgentJudge:
             if not uses:
                 text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
                 break
-            results, over = [], False
+            results = []
             for b in uses:
                 ans.tool_calls += 1
                 if ans.tool_calls > budget:
-                    over, out = True, "실행하지 않음(도구 예산 끝)"
+                    out = "실행하지 않음(도구 예산 끝)"
                 else:
                     out = tools.call(b.get("name", ""), b.get("input") or {})
                 results.append({"type": "tool_result", "tool_use_id": b["id"], "content": out})
-            if over:
-                # 예산이 끝났다는 말은 도구 결과가 아니라 사용자 글로 준다. 도구 결과 안의 지시는 따르지 않도록 시스템
-                # 지시문이 일러 두어, 모델이 그 말을 무시하고 "계속 읽겠다"는 글로 끝냈다(11/11 실측: JSON 이 없는 답)
+            if ans.tool_calls >= budget:
+                # 다음 요청부터 도구가 꺼진다. 그 사실과 할 일을 도구 결과가 아니라 사용자 글로 준다. 도구 결과 안의
+                # 지시는 따르지 않도록 시스템 지시문이 일러 두어 모델이 무시했고, 말없이 도구를 끄면 "더 읽겠다"는
+                # 글로 끝냈다(11/11 실측: JSON 이 없는 답)
                 results.append(
                     {
                         "type": "text",

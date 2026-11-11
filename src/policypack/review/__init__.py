@@ -43,6 +43,8 @@ PRICES = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
 """100만 토큰당 달러(입력, 출력). 보수 단가다. 모르는 모델은 opus 값으로 센다. 캐시 쓰기는 입력의 1.25배, 읽기는
 0.1배."""
 RESERVE = {"haiku": 0.15, "sonnet": 0.45, "opus": 2.0}
+MAX_TOKENS = 16000
+"""답 하나의 출력 상한. 이해 단계의 흐름과 기능 묶음의 답이 8192 에서 잘렸다(11/11 실측). 쓴 만큼만 청구된다."""
 """질문 하나를 새로 보내기 전에 남아 있어야 하는 어림 금액. 대화 중에는 멈출 수 없어 상한을 넘지 않게 미리 남긴다."""
 
 
@@ -170,7 +172,7 @@ class Run:
         if judge.deadline is not None and time.monotonic() >= judge.deadline:
             return None, "time-cap", self._log(stage, judge, meta, None, "time-cap")
         start = time.monotonic()
-        text, ans = judge.converse(prompt, self.root, budget)
+        text, ans = judge.converse(prompt, self.root, budget, max_tokens=MAX_TOKENS)
         self.spend.add(judge.model, ans.usage)
         failure, doc, extra = ans.failure, None, {}
         if failure and failure.startswith("time"):
@@ -178,7 +180,7 @@ class Run:
         if not failure:
             doc = P.parse_object(text, key)
             if doc is None and text.strip() and self.spend.allows(judge.model):
-                fixed, fix = judge.converse(P.REPAIR.format(key=key, raw=text[-12000:]), self.root, 0)
+                fixed, fix = judge.converse(P.REPAIR.format(key=key, raw=text[-24000:]), self.root, 0, MAX_TOKENS)
                 self.spend.add(judge.model, fix.usage)
                 ans.calls += fix.calls
                 for k, v in fix.usage.items():
@@ -227,7 +229,7 @@ def _found_lines(prof: dict) -> str:
 
 
 def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
-    budget = 30
+    budget = 40
     prompt = P.UNDERSTAND.format(
         found=_found_lines(prof),
         catalog="\n".join(f"- {k}: {v}" for k, v in catalog.items()),
