@@ -159,20 +159,36 @@ class Run:
     t0: float = field(default_factory=time.monotonic)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
-    def ask(self, stage: str, judge: AgentJudge, prompt: str, budget: int, meta: dict) -> tuple[str, str | None, int]:
-        """상한 안이면 묻고 기록한다. (답의 글, 실패 까닭, 기록 번호). 상한에 걸리면 글 없이 cost-cap·time-cap 이다."""
+    def ask(
+        self, stage: str, judge: AgentJudge, prompt: str, budget: int, meta: dict, key: str
+    ) -> tuple[dict | None, str | None, int]:
+        """상한 안이면 묻고, 답에서 `key` 를 가진 JSON 객체를 읽고, 기록한다. (객체, 실패 까닭, 기록 번호).
+        상한에 걸리면 묻지 않고 cost-cap·time-cap 이다. 답이 JSON 이 아니면 도구 없이 한 번 더, 그 답을 요청한 JSON 으로
+        옮겨 달라고 묻는다(repaired). 그래도 안 되면 parse 이고 답의 글 앞부분을 기록에 남긴다."""
         if not self.spend.allows(judge.model):
-            return "", "cost-cap", self._log(stage, judge, meta, None, "cost-cap")
+            return None, "cost-cap", self._log(stage, judge, meta, None, "cost-cap")
         if judge.deadline is not None and time.monotonic() >= judge.deadline:
-            return "", "time-cap", self._log(stage, judge, meta, None, "time-cap")
+            return None, "time-cap", self._log(stage, judge, meta, None, "time-cap")
         start = time.monotonic()
         text, ans = judge.converse(prompt, self.root, budget)
         self.spend.add(judge.model, ans.usage)
-        failure = ans.failure
+        failure, doc, extra = ans.failure, None, {}
         if failure and failure.startswith("time"):
             failure = "time-cap"
+        if not failure:
+            doc = P.parse_object(text, key)
+            if doc is None and text.strip() and self.spend.allows(judge.model):
+                fixed, fix = judge.converse(P.REPAIR.format(key=key, raw=text[-12000:]), self.root, 0)
+                self.spend.add(judge.model, fix.usage)
+                ans.calls += fix.calls
+                for k, v in fix.usage.items():
+                    ans.usage[k] = ans.usage.get(k, 0) + v
+                doc = P.parse_object(fixed, key) if not fix.failure else None
+                extra["repaired"] = doc is not None
+            if doc is None:
+                failure, extra["raw"] = "parse", text[:2000]
         timing = {"started": round(start - self.t0, 1), "seconds": round(time.monotonic() - start, 1)}
-        return text, failure, self._log(stage, judge, {**meta, **timing}, ans, failure)
+        return doc, failure, self._log(stage, judge, {**meta, **timing, **extra}, ans, failure)
 
     def _log(self, stage, judge, meta, ans: AgentAnswer | None, failure: str | None) -> int:
         rec = {"stage": stage, "model": judge.model, **meta, "failure": failure}
@@ -219,9 +235,8 @@ def understand(run: Run, prof: dict, catalog: dict[str, str]) -> dict:
         cite=P.CITE,
         rules=P.RULES,
     )
-    text, failure, _ = run.ask("understand", run.investigator, prompt, budget, {})
+    doc, _, _ = run.ask("understand", run.investigator, prompt, budget, {}, "summary")
     out = {"summary": "", "added": [], "removed": [], "nodes": [], "edges": [], "rejected_claims": 0, "answered": False}
-    doc = P.parse_object(text, "summary") if not failure else None
     if doc is None:
         return out
     out["answered"] = True
@@ -335,11 +350,10 @@ def investigate(run: Run, group: list[dict], feature: dict | None, summary: str,
         rules=P.RULES,
     )
     meta = {"feature": group[0]["feature"], "duties": [d["id"] for d in group]}
-    text, failure, qn = run.ask("investigate", run.investigator, prompt, budget, meta)
+    doc, failure, qn = run.ask("investigate", run.investigator, prompt, budget, meta, "results")
     results: dict[str, dict] = {}
-    if failure in ("cost-cap", "time-cap") and not text:
+    if failure in ("cost-cap", "time-cap") and doc is None and not run.questions[qn].get("calls"):
         return {d["id"]: {"asked": False, "why": failure, "q": qn} for d in group}
-    doc = P.parse_object(text, "results") if not failure else None
     wanted = {d["id"] for d in group}
     for r in (doc or {}).get("results") or []:
         if not isinstance(r, dict) or r.get("duty") not in wanted or r.get("status") not in P.STATUS_OF:
@@ -382,10 +396,9 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str) -> 
         summary=summary or "(요약 없음)", items="\n".join(blocks), budget=budget, cite=P.CITE, rules=P.RULES
     )
     meta = {"feature": group[0]["feature"], "duties": [d["id"] for d in items]}
-    text, failure, qn = run.ask("rebut", run.checker, prompt, budget, meta)
-    if failure in ("cost-cap", "time-cap") and not text:
+    doc, failure, qn = run.ask("rebut", run.checker, prompt, budget, meta, "results")
+    if failure in ("cost-cap", "time-cap") and doc is None and not run.questions[qn].get("calls"):
         return {d["id"]: {"result": "not-run", "why": failure, "q": qn} for d in items}
-    doc = P.parse_object(text, "results") if not failure else None
     out: dict[str, dict] = {}
     wanted = {d["id"] for d in items}
     for r in (doc or {}).get("results") or []:

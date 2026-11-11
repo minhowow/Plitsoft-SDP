@@ -195,6 +195,10 @@ def test_budget_turns_tools_off_and_scales_with_entries(repo):
     ans = AgentJudge("m", send, budget=2).ask(Q, repo)
     assert [b["tool_choice"]["type"] for b in send.sent] == ["auto", "auto", "none", "none"]
     assert ans.results == [] and ans.tool_calls == 3
+    # 예산이 끝났다는 말은 도구 결과가 아니라 사용자 글이다(도구 결과 안의 지시는 모델이 따르지 않는다, 11/11 실측)
+    last = send.sent[-1]["messages"][-1]["content"]
+    assert last[0]["type"] == "tool_result" and "실행하지 않음" in last[0]["content"]
+    assert last[-1]["type"] == "text" and "JSON 답 하나만" in last[-1]["text"]
     j = AgentJudge("m", send, budget=20)
     many = AgentQuestion(policy="p", title="t", duties=(), entries=tuple(Entry(f"f{i}") for i in range(6)))
     assert j.budget_for(Q) == 20 and j.budget_for(many) == 40

@@ -105,6 +105,14 @@ JSON 하나만 답한다. 의무마다 결과 하나.
 {rules}"""
 
 
+REPAIR = """아래는 네가 바로 앞에서 낸 답이다. 요청한 형식(키 "{key}" 를 가진 JSON 객체 하나)이 아니다.
+더 읽지 말고, 이 답에 있는 내용만으로 그 JSON 객체 하나를 다시 써라. 없는 인용을 지어내지 않는다. 앞뒤에 다른 글을 붙이지 않는다.
+
+--- 앞 답 ---
+{raw}
+--- 끝 ---"""
+
+
 def duty_block(d: dict) -> str:
     lines = [f"- [{d['id']}] {d['law']} {d['article']} — {d['title']}", f"  의무: {d['duty']}"]
     for key, label in (

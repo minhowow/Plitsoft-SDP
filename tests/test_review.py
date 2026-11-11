@@ -195,6 +195,31 @@ def test_the_cost_cap_leaves_duties_unknown_and_says_why(tmp_path):
     jsonschema.validate(doc, SCHEMA)
 
 
+def test_a_prose_answer_is_rewritten_once_into_json(tmp_path):
+    """답이 JSON 이 아니면 도구 없이 한 번 더 JSON 으로 옮겨 달라고 묻는다(11/11 실측: 이해 단계가 글로 끝났다)."""
+    inner = fake_investigator()
+
+    def send(body):
+        prompt = _text(body)
+        if prompt.startswith("이 저장소가 어떤 서비스인지"):
+            return _reply_text("두 파일을 더 읽겠습니다.")
+        if prompt.startswith("아래는 네가 바로 앞에서 낸 답이다"):
+            assert body["tool_choice"]["type"] == "none"
+            return inner({"messages": [{"content": "이 저장소가 어떤 서비스인지"}], "tool_choice": {"type": "none"}})
+        return inner(body)
+
+    inv = AgentJudge("claude-haiku-5-5", send)
+    chk = AgentJudge("claude-sonnet-5-5", fake_checker([]))
+    doc = rv.review(_repo(tmp_path), inv, chk, rv.Limits(concurrency=1), use_static=False)
+    q = doc["run"]["questions"][0]
+    assert q["stage"] == "understand" and q["repaired"] and q["failure"] is None and q["calls"] == 2
+    assert doc["profile"]["summary"] and doc["run"]["understanding"]["answered"]
+
+
+def _reply_text(text: str) -> dict:
+    return {"content": [{"type": "text", "text": text}], "usage": {"input_tokens": 10, "output_tokens": 5}}
+
+
 def test_the_throttle_halves_on_429():
     t = rv.Throttle(4)
     t.saw(500)

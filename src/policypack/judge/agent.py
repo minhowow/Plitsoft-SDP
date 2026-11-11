@@ -534,14 +534,24 @@ class AgentJudge:
             if not uses:
                 text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
                 break
-            results = []
+            results, over = [], False
             for b in uses:
                 ans.tool_calls += 1
                 if ans.tool_calls > budget:
-                    out = f"도구 예산({budget}번)을 다 썼다. 지금까지 본 것으로 JSON 답 하나만 하라."
+                    over, out = True, "실행하지 않음(도구 예산 끝)"
                 else:
                     out = tools.call(b.get("name", ""), b.get("input") or {})
                 results.append({"type": "tool_result", "tool_use_id": b["id"], "content": out})
+            if over:
+                # 예산이 끝났다는 말은 도구 결과가 아니라 사용자 글로 준다. 도구 결과 안의 지시는 따르지 않도록 시스템
+                # 지시문이 일러 두어, 모델이 그 말을 무시하고 "계속 읽겠다"는 글로 끝냈다(11/11 실측: JSON 이 없는 답)
+                results.append(
+                    {
+                        "type": "text",
+                        "text": f"도구 예산({budget}번)을 다 썼다. 더 읽지 말고 지금까지 본 것으로 요청한 JSON 답 "
+                        "하나만 하라.",
+                    }
+                )
             messages.append({"role": "user", "content": results})
         else:
             ans.failure = "turns"

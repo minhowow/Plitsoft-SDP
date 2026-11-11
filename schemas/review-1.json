@@ -898,6 +898,12 @@
           "type": "number",
           "minimum": 0
         },
+        "repaired": {
+          "type": "boolean"
+        },
+        "raw": {
+          "type": "string"
+        },
         "calls": {
           "type": "integer",
           "minimum": 0
