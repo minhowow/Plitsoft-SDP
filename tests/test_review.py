@@ -491,6 +491,7 @@ def test_an_unknown_applicability_goes_to_check_applicability(tmp_path):
     assert all(i["status"] == "check-applicability" for i in unsure)
     assert all(i["verification"]["gate"]["why"] == "applies-unknown" for i in unsure)
     assert all(i["status"] == "seen-in-code" and i["verification"]["gate"] is None for i in sure)
+    assert all(i["first"]["basis"] == "처리 없음" for i in flipped)  # 조사 답의 근거도 출력에 남는다
     kid = next(i for i in doc["checklist"] if i["duty"] == "pipa-22-2-1")  # 조사 답부터 해당 여부(audience)
     assert kid["status"] == "check-applicability" and kid["first"]["gate"]["why"] == "audience"
 

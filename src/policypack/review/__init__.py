@@ -74,7 +74,7 @@ NOT_ANSWERED = {"cost-cap": "저장소당 금액 상한에 걸려 묻지 못했�
 GOODS_LABEL = "특정 품목을 판다면 확인할 것"
 FIRST_KEYS = (
     *("answered", "status", "citations", "searches"),
-    *("applies", "condition", "missing", "shows", "gate", "reason", "question"),
+    *("applies", "condition", "missing", "shows", "basis", "gate", "reason", "question"),
 )
 PRICES = {
     "claude-opus-5-5": (4.0, 5.0, 0.20, 20.0),
