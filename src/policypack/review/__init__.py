@@ -71,11 +71,22 @@ FIRST_KEYS = (
     *("answered", "status", "citations", "searches"),
     *("applies", "condition", "missing", "shows", "gate", "reason", "question"),
 )
-PRICES = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
-"""100만 토큰당 달러(입력, 출력). 보수 단가다. 모르는 모델은 opus 값으로 센다. 캐시 쓰기는 입력의 1.25배, 읽기는
-0.1배."""
-RESERVE = {"haiku": 0.15, "sonnet": 0.45, "opus": 2.0}
-"""질문 하나를 새로 보내기 전에 남아 있어야 하는 어림 금액. 대화 중에는 멈출 수 없어 상한을 넘지 않게 미리 남긴다."""
+PRICES = {
+    "claude-opus-5-5": (4.0, 5.0, 0.20, 20.0),
+    "claude-sonnet-5-5": (2.0, 2.5, 0.10, 10.0),
+    "claude-haiku-5-5": (0.10, 0.125, 0.01, 0.50),
+}
+"""100만 토큰당 달러(입력, 5분 캐시 쓰기, 캐시 읽기, 출력). 공식 가격표(2026-11-12 확인,
+platform.claude.com/docs/en/about-claude/pricing)다. 이 앞의 표는 옛 모델 단가(haiku $1/$5, sonnet $3/$15, 캐시 읽기
+0.1배)라 11/12 실측을 2.4배로 셌다($36.64, 공식 단가로 약 $15). 모델 id 가 이 키로 시작하면 그 단가다."""
+UNKNOWN_PRICE = (15.0, 18.75, 1.50, 75.0)
+"""표에 없는 모델의 단가. 가격표에서 가장 비싼 값(opus 4.1)이라 틀려도 상한이 먼저 걸리는 쪽이다."""
+LONG_PROMPT = {"claude-haiku-5-5": (100_000, 5.0)}
+"""호출 하나의 프롬프트(입력 + 캐시 쓰기 + 캐시 읽기)가 이 토큰 수를 넘으면 그 호출의 모든 단가가 이 배수다."""
+RESERVE = {"claude-haiku-5-5": 0.05, "claude-sonnet-5-5": 0.15, "claude-opus-5-5": 0.30}
+"""질문 하나를 새로 보내기 전에 남아 있어야 하는 어림 금액. 대화 중에는 멈출 수 없어 상한을 넘지 않게 미리 남긴다.
+11/12 실측 질문 하나의 최대(공식 단가): haiku 약 $0.02, sonnet $0.12. 표에 없는 모델은 UNKNOWN_RESERVE."""
+UNKNOWN_RESERVE = 2.0
 MAX_TOKENS = 16000
 """답 하나의 출력 상한. 이해 단계의 흐름과 기능 묶음의 답이 8192 에서 잘렸다(11/11 실측). 쓴 만큼만 청구된다."""
 
@@ -83,18 +94,28 @@ MAX_TOKENS = 16000
 # ── 상한과 속도 ─────────────────────────────────────────────────────
 
 
-def _tier(model: str) -> str:
-    return next((t for t in PRICES if t in model), "opus")
+def _model(model: str) -> str | None:
+    return next((m for m in PRICES if model.startswith(m)), None)
 
 
 def usd(model: str, usage: dict) -> float:
-    pin, pout = PRICES[_tier(model)]
-    return (
+    """호출 하나의 금액."""
+    known = _model(model)
+    pin, pwrite, pread, pout = PRICES[known] if known else UNKNOWN_PRICE
+    prompt = sum(usage.get(k, 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+    limit, times = LONG_PROMPT.get(known or "", (0, 1.0))
+    scale = (times if limit and prompt > limit else 1.0) / 1e6
+    return scale * (
         usage.get("input_tokens", 0) * pin
-        + usage.get("cache_creation_input_tokens", 0) * pin * 1.25
-        + usage.get("cache_read_input_tokens", 0) * pin * 0.1
+        + usage.get("cache_creation_input_tokens", 0) * pwrite
+        + usage.get("cache_read_input_tokens", 0) * pread
         + usage.get("output_tokens", 0) * pout
-    ) / 1e6
+    )
+
+
+def cost(model: str, ans: AgentAnswer) -> float:
+    """질문 하나(대화의 호출 전부)의 금액. 호출마다 매겨 더한다."""
+    return sum(usd(model, u) for u in ans.per_call)
 
 
 class Spend:
@@ -106,13 +127,13 @@ class Spend:
 
     def allows(self, model: str) -> bool:
         with self._lock:
-            return self.usd + RESERVE[_tier(model)] <= self.cap
+            return self.usd + RESERVE.get(_model(model) or "", UNKNOWN_RESERVE) <= self.cap
 
-    def add(self, model: str, usage: dict) -> None:
+    def add(self, model: str, ans: AgentAnswer) -> None:
         with self._lock:
-            self.usd += usd(model, usage)
+            self.usd += cost(model, ans)
             mine = self.usage.setdefault(model, {})
-            for k, v in usage.items():
+            for k, v in ans.usage.items():
                 if isinstance(v, int):
                     mine[k] = mine.get(k, 0) + v
 
@@ -316,7 +337,7 @@ class Run:
             return None, "time-cap", self._log(stage, judge, meta, None, "time-cap")
         start = time.monotonic()
         text, ans = judge.converse(prompt, self.root, budget, max_tokens=MAX_TOKENS)
-        self.spend.add(judge.model, ans.usage)
+        self.spend.add(judge.model, ans)
         failure, doc, extra = ans.failure, None, {}
         if failure and failure.startswith("time"):
             failure = "time-cap"
@@ -324,8 +345,9 @@ class Run:
             doc = P.parse_object(text, key)
             if doc is None and text.strip() and self.spend.allows(judge.model):
                 fixed, fix = judge.converse(P.REPAIR.format(key=key, raw=text[-24000:]), self.root, 0, MAX_TOKENS)
-                self.spend.add(judge.model, fix.usage)
+                self.spend.add(judge.model, fix)
                 ans.calls += fix.calls
+                ans.per_call += fix.per_call
                 for k, v in fix.usage.items():
                     ans.usage[k] = ans.usage.get(k, 0) + v
                 doc = P.parse_object(fixed, key) if not fix.failure else None
@@ -343,7 +365,7 @@ class Run:
                 "tool_calls": ans.tool_calls,
                 "budget": ans.budget,
                 "usage": ans.usage,
-                "usd": round(usd(judge.model, ans.usage), 4),
+                "usd": round(cost(judge.model, ans), 4),
                 "sent": {
                     "read": ans.read_files,
                     "searches": ans.searches,

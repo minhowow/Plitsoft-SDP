@@ -398,6 +398,8 @@ class AgentAnswer:
     tool_calls: int = 0
     budget: int = 0
     usage: dict = field(default_factory=dict)
+    per_call: list[dict] = field(default_factory=list)
+    """호출마다의 사용량. 금액은 호출마다 매긴다(haiku 5.5 는 호출 하나의 프롬프트 길이로 단가가 바뀐다)."""
     transcript: list = field(default_factory=list)
     read_files: list[str] = field(default_factory=list)
     searches: list[str] = field(default_factory=list)
@@ -547,10 +549,11 @@ class AgentJudge:
             self._down = 0
             self.calls += 1
             ans.calls += 1
-            for k, v in (resp.get("usage") or {}).items():
-                if isinstance(v, int):
-                    ans.usage[k] = ans.usage.get(k, 0) + v
-                    self.usage[k] = self.usage.get(k, 0) + v
+            used = {k: v for k, v in (resp.get("usage") or {}).items() if isinstance(v, int)}
+            ans.per_call.append(used)
+            for k, v in used.items():
+                ans.usage[k] = ans.usage.get(k, 0) + v
+                self.usage[k] = self.usage.get(k, 0) + v
             content = resp.get("content") or []
             ans.stop_reason = resp.get("stop_reason")
             ans.transcript.append({"sent_tail": messages[-1], "received": content})

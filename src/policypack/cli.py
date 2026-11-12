@@ -154,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["duty", "feature"],
         help="질문 하나에 의무 하나(기본) 또는 기능 하나(의무 8개까지). 11/11 실측: duty 가 인용이 많고 비용은 1.8배",
     )
-    rv.add_argument("--max-usd", type=float, default=5.0, help="저장소 한 번의 어림 금액 상한(보수 단가, 기본 5)")
+    rv.add_argument("--max-usd", type=float, default=5.0, help="저장소 한 번의 어림 금액 상한(공식 단가, 기본 5)")
     rv.add_argument("--time-limit", type=float, default=360.0, help="저장소 한 번의 시간 상한(초, 기본 360)")
     rv.add_argument("--concurrency", type=int, default=6, help="동시에 묻는 질문 수(429 를 받으면 줄인다, 기본 6)")
     rv.add_argument("--no-static", action="store_true", help="내장 정책 팩의 정적 검사를 돌리지 않는다")

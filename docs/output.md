@@ -111,7 +111,7 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 | `obligations.listed[]` | 목록 층: 감지된 기능과 거의 모든 서비스에 걸릴 수 있는 의무. `in_checklist` 는 검토 층에 들었는지 |
 | `checklist[]` | 검토 층. 이미 갈래 순으로 늘어서 있고 `rank` 가 1 부터다. 의무마다 `status`·`status_label`, 인용 `citations`, 부재를 보인 검색 `searches`, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 `verification`(upheld · overturned · overturn-ungrounded · not-run, 조문 밖 요건이었는지 `off_quote`), 내장 팩 정적 결과 `static`, 조건은 있는데 없는 지킨 처리 `missing`(예: "약관 고지 화면이 없음"), 묻지 않은 품목 의무의 묶음 `group`(goods) |
 | `first`·`verification` 의 덧붙임(11/12) | 답이 적은 걸리는 조건 `applies`(예·아니오·모름)·`condition`, 없는 것 `missing`, 충족 인용의 성격 `shows`(행위·이름·기본값), 관문이 답을 바꾼 까닭 `gate`(`why`: condition-present · no-condition · name-or-default, `note` 는 `reason` 앞에도 붙는다). 인용의 `why` 가 `profile` 이면 모델의 인용이 아니라 기능이 있다는 프로필 신호(걸리는 조건의 근거)다 |
-| `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(보수 단가), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 검색과 다시 돌려 맞지 않은 수, 못 물은 의무(`not_asked`), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
+| `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(공식 단가를 호출마다 매겨 더한 값), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 검색과 다시 돌려 맞지 않은 수, 못 물은 의무(`not_asked`), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
 
 상태(갈래 순):
 

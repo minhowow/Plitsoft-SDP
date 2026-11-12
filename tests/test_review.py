@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from policypack import review as rv
-from policypack.judge.agent import AgentJudge
+from policypack.judge.agent import AgentAnswer, AgentJudge
 from policypack.review import prompts as P
 
 jsonschema = pytest.importorskip("jsonschema")
@@ -296,15 +296,36 @@ def test_a_saved_understanding_is_reused_without_asking(tmp_path):
 
 
 def test_the_cost_cap_leaves_duties_unknown_and_says_why(tmp_path):
-    doc, _ = _run(_repo(tmp_path), "duty", use_static=False, usd=0.16)
+    cap = rv.RESERVE["claude-haiku-5-5"] + 0.001
+    doc, _ = _run(_repo(tmp_path), "duty", use_static=False, usd=cap)
     unknown = [i for i in doc["checklist"] if i["status"] == "unknown"]
     assert unknown and all(i["not_answered"] == "cost-cap" for i in unknown)
     assert doc["run"]["not_asked"]["cost-cap"] == len(unknown)
-    assert doc["run"]["usd_estimate"] <= 0.16
+    assert doc["run"]["usd_estimate"] <= cap
     # 상한에 걸리면 '거의 모든 서비스'와 가입·AI·외부 전송부터 묻는다
     asked = [q["feature"] for q in doc["run"]["questions"] if q["stage"] == "investigate" and q.get("calls")]
     assert asked and asked[0] == "common"
     _valid(doc)
+
+
+def test_cost_is_the_official_price_for_each_call():
+    # sonnet 5.5: 입력 $2, 5분 캐시 쓰기 $2.5, 캐시 읽기 $0.1, 출력 $10 (100만 토큰당)
+    m = 1_000_000
+    assert rv.usd("claude-sonnet-5-5", {"input_tokens": m, "output_tokens": m}) == pytest.approx(12.0)
+    cached = {"cache_creation_input_tokens": m, "cache_read_input_tokens": m}
+    assert rv.usd("claude-sonnet-5-5", cached) == pytest.approx(2.6)
+    # haiku 5.5: 호출 하나의 프롬프트(입력 + 캐시 쓰기·읽기)가 10만 토큰을 넘으면 그 호출의 모든 단가가 5배
+    short = {"input_tokens": 50_000, "cache_read_input_tokens": 40_000, "output_tokens": 1000}
+    long = {**short, "cache_read_input_tokens": 60_000}
+    assert rv.usd("claude-haiku-5-5", short) == pytest.approx(0.0059)
+    assert rv.usd("claude-haiku-5-5", long) == pytest.approx(0.0305)
+    # 호출마다 매긴다: 9만 토큰 호출 둘은 18만 토큰 호출 하나가 아니다
+    ans = AgentAnswer(per_call=[short, short])
+    assert rv.cost("claude-haiku-5-5", ans) == pytest.approx(0.0118)
+    # 표에 없는 모델은 가장 비싼 단가로 세고, 상한 앞에 크게 남긴다
+    assert rv.usd("claude-sonnet-4-5", {"input_tokens": m}) == pytest.approx(15.0)
+    spend = rv.Spend(1.0)
+    assert spend.allows("claude-sonnet-5-5") and not spend.allows("claude-sonnet-4-5")
 
 
 def test_a_prose_answer_is_rewritten_once_into_json(tmp_path):
