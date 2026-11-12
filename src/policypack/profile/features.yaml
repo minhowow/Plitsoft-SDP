@@ -18,6 +18,14 @@
 #   scope 가 sector 인 의무는 모두 '지위'(공공기관·금융회사 등 주체의 지위로 걸리는 의무)다
 #   그 밖은 duties(의무 id)가 먼저, 다음이 scope_notes(의무 지도의 scope_note) 다
 # 표는 scripts/lawmap_table.py 가 만든다(src/policypack/profile/duties.jsonl).
+#
+# whenever — 그 기능이 있으면 걸리는 의무(걸리는 조건이 곧 기능이다. 가입을 받으면 약관 고지, 위치를 모으면 철회 시 파기).
+#   review 는 이 의무에 '해당 없음'을 받지 않는다. 기능이 있는데 지킨 처리가 보이지 않으면 '코드에서 본 것'이다
+#   (11/12 실측: 약관이 아예 없다, 탈퇴 경로가 아예 없다를 '해당 없음'으로 읽었다).
+#
+# goods — 특정 품목을 팔 때만 걸리는 의무. 그 품목의 신호(paths, 그리고 서비스 소스의 글에 그대로 있는 낱말 words)가
+#   없으면 묻지 않고 체크리스트의 '해당 여부부터 확인할 것' 맨 뒤에 한 묶음(group: goods)으로 싣는다. 신호가 있으면 기능
+#   안에서 맨 뒤에 묻는다(11/12 실측: 상한에 걸린 POS 가 농산물 원산지를 묻고 탈퇴·해지는 묻지 못했다).
 
 common:
   name: 거의 모든 서비스
@@ -62,6 +70,7 @@ features:
       - pipa-decree-17-2
       - pipa-59-1-h1
       - tcra-3-2
+    whenever: [tcra-3-2]
 
   - id: account
     name: 회원 탈퇴·내 정보 관리
@@ -130,6 +139,7 @@ features:
       calls: [IMP.request_pay, loadTossPayments, requestPayment]
     scope_notes: [전자결제, 카드 가맹점, 결제 가맹점, 휴대폰 결제, 자동이체, 선불 충전, 선불·포인트, 적립금, 유료 결제, 구독 결제]
     duties: [tcra-3-3]
+    whenever: [ecom-8-2]
 
   - id: commerce
     name: 상품 판매(통신판매)
@@ -139,6 +149,7 @@ features:
                   표준약관 표지, KC대상 판매, 농식품 판매, 가전·의류 판매, 중고 전기용품, 병행수입 판매, 도서 판매, 전자책 판매,
                   도서 기관 납품, 주류 판매, 안경·렌즈 판매, 성인 상품]
     duties: [fla-3-1-h1, fla-3-1-h2, fla-3-1-h3]
+    whenever: [ecom-5-4, ecom-6-1, ecom-10-1, ecom-13-1, ecom-13-2, ecom-13-2-h5, ecom-21-2-1-h4]
 
   - id: marketplace
     name: 중개·거래 플랫폼
@@ -155,6 +166,7 @@ features:
       paths: [location, geolocation, nearby]
       calls: [navigator.geolocation, kakao.maps, naver.maps, getCurrentPositionAsync]
     scope_notes: [위치]
+    whenever: [locinfo-12-1, locinfo-15-1, locinfo-16-2, locinfo-19-1, locinfo-23-1, locinfo-24-2, locinfo-24-4]
 
   - id: ad-send
     name: 광고성 정보 발송(문자·푸시·메일)
@@ -183,6 +195,7 @@ features:
       calls: [chat.completions.create, responses.create, generateContent]
       urls: [api.openai.com, api.anthropic.com, generativelanguage.googleapis.com]
     scope_notes: [생성형 AI, 고영향 AI, AI 합성물, AI 가상인물, 아동 챗봇, 자동화 결정, AI 음성·얼굴, 얼굴 합성]
+    whenever: [aiact-31-1, aiact-31-2]
 
   - id: external-transfer
     name: 외부 업체·국외로 개인정보 전송(외부 AI 포함)
@@ -311,3 +324,35 @@ features:
       packages: [react-native, expo, "@capacitor/core", "@ionic/react", "@ionic/angular", cordova]
     scope_notes: [모바일 앱, 설치형 프로그램, 단말 식별]
     duties: [disc-21-2, disc-decree-14-6-h4, disc-decree-14-6-h5, dvnotice-16-2-app]
+
+goods:
+  - id: liquor
+    name: 주류
+    duties: [liquor-mail-6-0-0-2]
+    paths: [liquor, wine, wines, beer, soju, whisky, makgeolli, alcohol]
+    words: [주류, 와인, 맥주, 소주, 위스키, 전통주, 막걸리]
+  - id: books
+    name: 도서·간행물
+    duties: [publishing-22-3, publishing-22-4, publishing-22-5]
+    paths: [books, ebook, ebooks, isbn, bookstore]
+    words: [도서, 전자책, 간행물, ISBN]
+  - id: eyewear
+    name: 안경·콘택트렌즈
+    duties: [medtech-12-5]
+    paths: [eyewear, eyeglasses, glasses, contactlens]
+    words: [안경, 콘택트렌즈]
+  - id: electric
+    name: 전기용품·생활용품
+    duties: [elec-safety-9-4, elec-safety-18-4, elec-safety-25-4]
+    paths: [appliance, appliances, electronics]
+    words: [전기용품, 생활용품, 가전제품, KC 인증, KC인증, 안전인증]
+  - id: agri
+    name: 농수산물
+    duties: [agri-origin-5-1, agri-origin-r3-b3-2]
+    paths: [farm, grocery, groceries, seafood, fruit, fruits, vegetable, vegetables]
+    words: [농산물, 수산물, 축산물, 원산지, 과일, 채소, 한우]
+  - id: youth-harmful
+    name: 청소년유해약물(주류·담배 등)
+    duties: [youth-28-4]
+    paths: [tobacco, vape, cigarette, liquor, wine, beer, soju, alcohol]
+    words: [담배, 전자담배, 주류, 와인, 맥주, 소주]

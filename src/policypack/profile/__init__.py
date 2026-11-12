@@ -5,6 +5,7 @@
 여기서는 판단하지 않는다. "이 기능이 있으니 이 의무가 걸릴 수 있다"까지만이다(목록 층).
 
 시험·픽스처·설정 파일(index/roles.py 의 test·config)의 신호는 기능으로 세지 않고 `test_only` 로 따로 낸다.
+특정 품목(주류·도서 등, features.yaml 의 goods)의 신호는 `goods` 로 낸다. review 가 품목 의무를 물을지 정한다.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ EVIDENCE_SHOWN = 5
 """기능마다 싣는 근거 수. 전체 수는 evidence_total 에 있다."""
 PLATFORM = {"web-ui", "mobile-app"}
 """화면·앱 자체를 뜻하는 기능. 이것만 있으면 서비스 기능(가입·결제 등)을 찾지 못한 것으로 본다."""
-_KIND_ORDER = {"package": 0, "import": 1, "call": 2, "url": 3, "path": 4, "screens": 5}
+_KIND_ORDER = {"package": 0, "import": 1, "call": 2, "url": 3, "path": 4, "word": 5, "screens": 6}
 MOBILE = {"react-native", "expo", "@capacitor/core", "@ionic/react", "@ionic/angular", "@ionic/vue", "cordova"}
 WEB = {"next", "nuxt", "vue", "svelte", "@sveltejs/kit", "@angular/core", "gatsby", "@remix-run/react", "astro", "vite",
        "react-scripts", "preact", "solid-js"}  # fmt: skip
@@ -53,7 +54,7 @@ def load_duties() -> tuple[dict, ...]:
 @dataclass(frozen=True)
 class Hit:
     feature: str
-    kind: str  # package · import · call · path · screens
+    kind: str  # package · import · call · url · path · word · screens
     value: str
     file: str
     line: int | None
@@ -66,6 +67,7 @@ class Hit:
             "call": f"{self.value} 호출",
             "url": f"주소 {self.value}",
             "path": f"경로 낱말 '{self.value}'",
+            "word": f"글에 '{self.value}'",
             "screens": "화면 파일(JSX·TSX)",
         }[self.kind]
         return {"file": self.file, "line": self.line, "signal": self.kind, "value": self.value, "what": what}
@@ -163,6 +165,7 @@ class Matcher:
         self.paths: dict[str, list[str]] = {}
         self.calls: dict[str, list[str]] = {}
         self.urls: dict[str, list[str]] = {}
+        self.words: dict[str, list[str]] = {}
         self.screens: list[str] = []
         for f in features:
             sig = f.get("signals") or {}
@@ -173,6 +176,8 @@ class Matcher:
                 self.calls.setdefault(c, []).append(f["id"])
             for u in sig.get("urls") or []:
                 self.urls.setdefault(u, []).append(f["id"])
+            for w in sig.get("words") or []:
+                self.words.setdefault(w, []).append(f["id"])
             if sig.get("screens"):
                 self.screens.append(f["id"])
         alts = [
@@ -186,6 +191,9 @@ class Matcher:
             for u in sorted(self.urls, key=len, reverse=True)
         ]
         self.url_re = re.compile(r"(?<=[\"'`])(" + "|".join(hosts) + ")") if hosts else None
+        # 품목 낱말은 화면 문구·분류 목록(문자열)에 나온다. 글 어디서나 센다
+        words = [re.escape(w) for w in sorted(self.words, key=len, reverse=True)]
+        self.word_re = re.compile("|".join(words)) if words else None
 
     def url_of(self, matched: str) -> str:
         return next(u for u in sorted(self.urls, key=len, reverse=True) if matched.endswith(u) or matched == u)
@@ -263,6 +271,10 @@ def scan(root: Path, m: Matcher) -> tuple[list[Hit], dict, dict]:
                     continue
                 url, line = m.url_of(mt.group(1)), text.count("\n", 0, mt.start()) + 1
                 hits += [Hit(f, "url", url, rel, line, service) for f in m.urls[url]]
+        if m.word_re:
+            for mt in m.word_re.finditer(text):
+                line = text.count("\n", 0, mt.start()) + 1
+                hits += [Hit(f, "word", mt.group(0), rel, line, service) for f in m.words[mt.group(0)]]
     return hits, counts, facts
 
 
@@ -311,7 +323,8 @@ def _evidence(hits: list[Hit]) -> list[dict]:
 def profile(root: Path) -> dict:
     spec = load_features()
     features = spec["features"]
-    hits, counts, facts = scan(root, Matcher(features))
+    goods = spec.get("goods") or []
+    hits, counts, facts = scan(root, Matcher([*features, *({"id": g["id"], "signals": g} for g in goods)]))
     plats = platforms(facts, counts, any(h.kind == "screens" and h.service for h in hits))
     if "web" not in plats:
         # 웹이 아니면 화면 파일은 웹 화면 신호가 아니다(React Native 앱에 웹 접근성을 묻지 않는다)
@@ -368,6 +381,15 @@ def profile(root: Path) -> dict:
         "note": "공공기관·금융회사 등 운영 주체의 지위로 걸리는 의무입니다. 코드로 가리지 않아 목록에 싣지 않습니다.",
     }
     out["test_only"] = test_only
+    out["goods"] = []
+    for g in goods:
+        gh = [h for h in by_feature.get(g["id"], []) if h.service]
+        if gh:
+            ev = _evidence(gh)
+            out["goods"].append(
+                {"id": g["id"], "name": g["name"], "evidence": ev[:EVIDENCE_SHOWN], "evidence_total": len(ev),
+                 "duties": list(g["duties"])}
+            )  # fmt: skip
     listed = sum(f["duties"]["count"] for f in found) + (out["common"]["duties"]["count"] if "common" in out else 0)
     review = sum(f["duties"]["review_candidates"] for f in found) + (
         out["common"]["duties"]["review_candidates"] if "common" in out else 0

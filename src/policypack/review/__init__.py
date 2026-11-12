@@ -10,14 +10,21 @@
      충족 근거 있음        인용이 관문을 통과해야 한다. 아니면 '저장소 밖에서 확인할 것'
      코드에서 본 것        걸리는 처리의 인용이 관문을 통과해야 한다. 아니면 '저장소 밖에서 확인할 것'
      저장소 밖에서 확인할 것 · 해당 여부부터 확인할 것   그대로
-     해당 없음             찾아본 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같아야 한다(부재의 증명).
-                           아니면 '걸리지 않는 것으로 보임(확인 안 됨)'이고 확인 목록에 올리지 않는다
+     해당 없음             걸리는 조건 자체가 없다는 답(applies '아니오'와 condition)이어야 하고, 찾아본 검색(정규식·
+                           줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같아야 한다(부재의 증명). 증명이 없으면 '걸리지
+                           않는 것으로 보임(확인 안 됨)'이고 확인 목록에 올리지 않는다. 조건은 있는데 지킨 처리만
+                           없다는 답과, 그 기능이 있으면 걸리는 의무(features.yaml 의 whenever)에 기능이 있는 경우는
+                           '코드에서 본 것', 조건을 말하지 않았으면 '해당 여부부터 확인할 것'이다(gate)
+     충족(덧붙임)          인용이 조문이 요구하는 행위 자체여야 한다(shows '행위'). 이름·기본값뿐이면 '코드에서 본 것'
    시험·설정 파일의 줄은 인용으로 받지 않는다. 요건은 조문 인용에 있는 것만 묻는다.
+   특정 품목(주류·도서 등, features.yaml 의 goods) 의무는 프로필에 그 품목 신호가 없으면 묻지 않고 '해당 여부부터
+   확인할 것'에 한 묶음(group: goods)으로 싣는다.
 5. 반박: 다른 모델이 빼는 답(충족·해당 없음·걸리지 않는 것으로 보임)에는 "지키지 않은 곳을 찾아라", 코드에서 본 것과
    저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다. 앞
    판단이 조문에 없는 요건을 들었는지도 적는다(off_quote). 해당 여부는 사업자의 판단이라 반박하지 않는다.
 6. 체크리스트는 상태의 갈래 순(코드에서 본 것이 맨 위), 그 안에서는 거의 모든 서비스·가입·AI·외부 전송 순이다.
-   `summary` 에 갈래별 수와 맨 위 다섯 건이 있다.
+   기능 안에서는 핵심 의무(일반 범위 → 흔한 것 → 확신 높은 것)가 먼저이고 품목 의무가 맨 뒤다. 묻는 순서도 같아서
+   상한에 걸려도 핵심은 묻는다. `summary` 에 갈래별 수와 맨 위 다섯 건, 묶음(groups)이 있다.
 
 지키는 것: 인용 관문, 비밀값 가리기·비밀 파일 거부(judge/agent.RepoTools), 저장소 밖 읽기 금지, 저장소당 상한(어림
 금액·시간). 상한 때문에 묻지 못한 의무는 '모름'으로 싣고 까닭을 적는다. 동시 요청은 429 를 보면 반으로 줄인다.
@@ -33,7 +40,7 @@ import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -46,7 +53,10 @@ from policypack.review import prompts as P
 
 REVIEW_VERSION = 2
 """1 → 2: '확인할 것'을 세 갈래(seen-in-code·check-outside·check-applicability)로 나누고, 부재 증명(searches)과
-'걸리지 않는 것으로 보임'(likely-not-applicable)을 더했다. 체크리스트를 갈래 순으로 늘어놓고 summary 를 더했다."""
+'걸리지 않는 것으로 보임'(likely-not-applicable)을 더했다. 체크리스트를 갈래 순으로 늘어놓고 summary 를 더했다.
+2판 안의 덧붙임(11/12): 답의 applies·condition·missing·shows 와 관문이 바꾼 까닭(gate), 품목 묶음(group,
+summary.groups), not_answered 'goods-not-detected', 인용 why 'profile'(기능이 있다는 프로필 신호를 조건의 근거로
+붙인 것)."""
 PRIORITY = ("common", "signup", "genai", "external-transfer")
 """상한에 걸리면 이 순서로 먼저 묻고, 체크리스트의 같은 갈래 안에서도 이 순서로 놓는다. 나머지는 기능 목록의 순서다."""
 GROUP_MAX = 8
@@ -56,6 +66,11 @@ TO_CHECK = ("seen-in-code", "check-outside")
 """반박이 "지킨 근거"를 찾는 상태. 해당 여부(check-applicability)는 사업자의 판단이라 묻지 않는다."""
 PLATFORM_KO = {"web": "웹", "mobile": "모바일 앱", "server": "서버"}
 NOT_ANSWERED = {"cost-cap": "저장소당 금액 상한에 걸려 묻지 못했습니다", "time-cap": "시간 상한에 걸렸습니다"}
+GOODS_LABEL = "특정 품목을 판다면 확인할 것"
+FIRST_KEYS = (
+    *("answered", "status", "citations", "searches"),
+    *("applies", "condition", "missing", "shows", "gate", "reason", "question"),
+)
 PRICES = {"opus": (15.0, 75.0), "sonnet": (3.0, 15.0), "haiku": (1.0, 5.0)}
 """100만 토큰당 달러(입력, 출력). 보수 단가다. 모르는 모델은 opus 값으로 센다. 캐시 쓰기는 입력의 1.25배, 읽기는
 0.1배."""
@@ -162,6 +177,92 @@ def check(root: Path, citations: list[dict]) -> list[dict]:
 
 def grounded(cs: list[dict]) -> bool:
     return any(c["ok"] for c in cs)
+
+
+def _whenever() -> dict[str, str]:
+    """그 기능이 있으면 걸리는 의무 → 기능 id (features.yaml 의 whenever)."""
+    return {d: f["id"] for f in load_features()["features"] for d in f.get("whenever") or []}
+
+
+def _goods() -> dict[str, dict]:
+    """특정 품목을 팔 때만 걸리는 의무 → 그 품목(features.yaml 의 goods)."""
+    return {d: g for g in load_features().get("goods") or [] for d in g["duties"]}
+
+
+def core_key(d: dict) -> tuple:
+    """기능 안에서 묻고 늘어놓는 순서: 품목 의무는 맨 뒤, 그 앞은 일반 범위 → 그 기능이 있으면 걸리는 의무(whenever) →
+    흔한 것(의무 지도의 freq) → 확신 높은 것. 11/12 실측: id 순으로 물어 상한에 걸린 POS 가 농산물 원산지를 묻고
+    탈퇴·해지(전자상거래법)는 묻지 못했다."""
+    return (
+        d["id"] in _goods(),
+        d["scope"] != "general",
+        d["id"] not in _whenever(),
+        -(d.get("freq") or 0),
+        d["confidence"] != "high",
+        d["id"],
+    )
+
+
+def _present(feature: dict | None) -> bool:
+    return feature is not None and "removed" not in feature
+
+
+def _feature_citations(root: Path, feature: dict) -> list[dict]:
+    """기능이 있다는 근거를 인용 꼴로(why: profile). 이해 단계의 인용(관문 통과)이 먼저, 다음이 프로필 신호의 줄이다."""
+    out = [c for c in feature.get("model_citations", []) if c.get("ok")]
+    for e in feature.get("evidence", []):
+        text = ""
+        if e.get("line"):
+            with suppress(OSError, IndexError):
+                text = (root / e["file"]).read_text(encoding="utf-8", errors="replace").splitlines()[e["line"] - 1]
+        out.append({"file": e["file"], "line": e.get("line"), "text": text.strip()[:200], "ok": True, "why": "profile"})
+    return out[:2]
+
+
+def said(r: dict) -> dict:
+    """답이 적은 걸리는 조건(applies·condition), 없는 것(missing), 충족 인용의 성격(shows)."""
+    return {
+        "applies": r.get("applies") if r.get("applies") in P.APPLIES else None,
+        "condition": str(r.get("condition") or "").strip()[:300],
+        "missing": str(r.get("missing") or "").strip()[:300],
+        "shows": r.get("shows") if r.get("shows") in P.SHOWS else None,
+    }
+
+
+def absent(d: dict, s: dict, proven: bool, feature: dict | None, cited: bool) -> tuple[str, dict | None]:
+    """'해당 없음'은 걸리는 조건 자체가 없을 때만 받는다(11/12 실측: '약관이 아예 없다', '탈퇴 경로가 아예 없다',
+    '위치 동의 철회 기능이 없다'를 해당 없음으로 읽었다 — 검색 관문은 줄 수만 맞춰 봐서 막지 못했다).
+    (상태, 관문이 바꾼 까닭 또는 None)"""
+    if d["id"] in _whenever() and _present(feature):
+        note = f"{feature['name']} 기능이 있으면 걸리는 의무라 '해당 없음'으로 받지 않았습니다"
+        note += ". 지킨 처리는 찾지 못했습니다"
+        return "seen-in-code", {"from": "not-applicable", "why": "condition-present", "note": _missing(note, s)}
+    if s["applies"] == "예":
+        note = "걸리는 조건이 있다고 답해" + (f"({s['condition']})" if s["condition"] else "")
+        note += " '해당 없음'으로 받지 않았습니다. 지킨 처리는 찾지 못했습니다"
+        gate_ = {"from": "not-applicable", "why": "condition-present", "note": _missing(note, s)}
+        return ("seen-in-code" if cited else "check-applicability"), gate_
+    if s["applies"] != "아니오" or not s["condition"]:
+        note = "걸리는 조건 자체가 없다는 답(applies '아니오'와 condition)이 없어 '해당 없음'으로 받지 않았습니다."
+        return "check-applicability", {"from": "not-applicable", "why": "no-condition", "note": note}
+    return ("not-applicable" if proven else "likely-not-applicable"), None
+
+
+def _missing(note: str, s: dict) -> str:
+    return note + (f": {s['missing']}." if s["missing"] else ".")
+
+
+def accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None):
+    """모델이 고른 상태에 받는 조건을 건다. (상태, 관문이 바꾼 까닭 또는 None)"""
+    if answered == "not-applicable":
+        return absent(d, s, proven, feature, grounded(cs))
+    if answered in ("evidence-found", "seen-in-code") and not grounded(cs):
+        return "check-outside", None
+    if answered == "evidence-found" and s["shows"] != "행위":
+        # 11/12 실측: helmet 의 기본 HSTS 만으로 전송 암호화 충족, 메뉴의 'GenAI' 글자로 AI 사전 고지 충족
+        note = "인용이 조문이 요구하는 행위가 아니라 이름·기본값뿐이라 '충족 근거 있음'으로 받지 않았습니다."
+        return "seen-in-code", {"from": answered, "why": "name-or-default", "note": note}
+    return answered, None
 
 
 def prove(root: Path, searches: list[dict]) -> tuple[list[dict], bool]:
@@ -420,15 +521,6 @@ def _budget(n: int, base: int, per: int, cap: int) -> int:
     return min(base + per * max(0, n - 1), cap)
 
 
-def _status(answered: str, cites: list[dict], proven: bool) -> str:
-    """모델이 고른 상태에 받는 조건을 건다."""
-    if answered in ("evidence-found", "seen-in-code") and not grounded(cites):
-        return "check-outside"
-    if answered == "not-applicable" and not proven:
-        return "likely-not-applicable"
-    return answered
-
-
 def investigate(
     run: Run, group: list[dict], feature: dict | None, summary: str, static: dict, platforms: str
 ) -> dict[str, dict]:
@@ -442,6 +534,8 @@ def investigate(
         budget=budget,
         cite=P.CITE,
         search=P.SEARCH,
+        condition=P.CONDITION,
+        act=P.ACT,
         absence=P.ABSENCE,
         rules=P.RULES,
     )
@@ -450,21 +544,28 @@ def investigate(
     results: dict[str, dict] = {}
     if failure in ("cost-cap", "time-cap") and doc is None and not run.questions[qn].get("calls"):
         return {d["id"]: {"asked": False, "why": failure, "q": qn} for d in group}
-    wanted = {d["id"] for d in group}
+    by_id = {d["id"]: d for d in group}
     for r in (doc or {}).get("results") or []:
-        if not isinstance(r, dict) or r.get("duty") not in wanted or r.get("status") not in P.ANSWER:
+        if not isinstance(r, dict) or r.get("duty") not in by_id or r.get("status") not in P.ANSWER:
             continue
         answered = P.ANSWER[r["status"]]
         cs = check(run.root, P.citations_of(r))
         searches, proven = prove(run.root, P.searches_of(r))
+        s = said(r)
+        status, gate_ = accept(by_id[r["duty"]], s, answered, cs, proven, feature)
+        if status == "seen-in-code" and not grounded(cs):
+            cs = cs + _feature_citations(run.root, feature)  # 조건(기능)이 있다는 근거는 프로필 신호다
+        reason = str(r.get("reason") or "")[:800]
         results[r["duty"]] = {
             "asked": True,
-            "status": _status(answered, cs, proven),
+            "status": status,
             "answered": answered,
             "citations": cs,
             "searches": searches,
+            **s,
+            "gate": gate_,
             "question": str(r.get("question") or "")[:400],
-            "reason": str(r.get("reason") or "")[:800],
+            "reason": f"{gate_['note']} {reason}".strip() if gate_ else reason,
             "q": qn,
         }
     for d in group:
@@ -473,7 +574,9 @@ def investigate(
     return results
 
 
-def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str, platforms: str) -> dict[str, dict]:
+def rebut(
+    run: Run, group: list[dict], first: dict[str, dict], summary: str, platforms: str, feature: dict | None = None
+) -> dict[str, dict]:
     items = [d for d in group if first.get(d["id"], {}).get("status") in (*DROPS, *TO_CHECK)]
     if not items:
         return {}
@@ -485,6 +588,8 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str, pla
         blocks.append(
             P.duty_block(d)
             + f"\n  앞 판단: {P.SAID[f['status']]} — {f['reason']}"
+            + (f"\n  앞 판단의 걸리는 조건: {f['condition']} ({f['applies'] or '?'})" if f.get("condition") else "")
+            + (f"\n  앞 판단이 적은 없는 것: {f['missing']}" if f.get("missing") else "")
             + (f"\n  앞 인용: {P.cite_lines(ok)}" if ok else "")
             + (f"\n  앞 검색: {P.search_lines(f['searches'])}" if f["searches"] else "")
         )
@@ -495,6 +600,8 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str, pla
         budget=budget,
         cite=P.CITE,
         search=P.SEARCH,
+        condition=P.CONDITION,
+        act=P.ACT,
         absence=P.ABSENCE,
         rules=P.RULES,
     )
@@ -503,15 +610,18 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str, pla
     if failure in ("cost-cap", "time-cap") and doc is None and not run.questions[qn].get("calls"):
         return {d["id"]: {"result": "not-run", "why": failure, "q": qn} for d in items}
     out: dict[str, dict] = {}
-    wanted = {d["id"] for d in items}
+    by_id = {d["id"]: d for d in items}
     for r in (doc or {}).get("results") or []:
-        if not isinstance(r, dict) or r.get("duty") not in wanted or r.get("result") not in ("유지", "뒤집음"):
+        if not isinstance(r, dict) or r.get("duty") not in by_id or r.get("result") not in ("유지", "뒤집음"):
             continue
         cs = check(run.root, P.citations_of(r))
         searches, proven = prove(run.root, P.searches_of(r))
+        s = said(r)
         rec = {
             "citations": cs,
             "searches": searches,
+            **s,
+            "gate": None,
             "off_quote": r.get("off_quote") is True,
             "reason": str(r.get("reason") or "")[:800],
             "q": qn,
@@ -521,17 +631,23 @@ def rebut(run: Run, group: list[dict], first: dict[str, dict], summary: str, pla
         if r["result"] == "유지" or (before in TO_CHECK and claimed not in ("evidence-found", "not-applicable")):
             out[r["duty"]] = {"result": "upheld", **rec}
             continue
-        # 빼는 답을 깨면 '코드에서 본 것'(인용 필요), 확인할 것을 깨면 충족(인용 필요) 또는 해당 없음(검색 증명 필요)
-        after = "seen-in-code" if before in DROPS else claimed
-        ok = proven if after == "not-applicable" else grounded(cs)
+        # 빼는 답을 깨면 '코드에서 본 것'(인용 필요). 확인할 것을 깨면 충족(행위 자체를 보이는 인용) 또는 해당
+        # 없음(걸리는 조건이 없다는 답과 검색 증명)이다. 해당 없음은 조사 답과 같은 관문(absent)을 넘어야 받는다
+        if before in DROPS:
+            after, ok = "seen-in-code", grounded(cs)
+        elif claimed == "evidence-found":
+            after, ok = claimed, grounded(cs) and s["shows"] == "행위"
+        else:
+            got, rec["gate"] = absent(by_id[r["duty"]], s, proven, feature, grounded(cs))
+            after, ok = claimed, got == "not-applicable"
         out[r["duty"]] = {"result": "overturned" if ok else "overturn-ungrounded", "status": after, **rec}
     for d in items:
         out.setdefault(d["id"], {"result": "not-run", "why": failure or "no-answer", "q": qn})
     return out
 
 
-def _item(d: dict, first: dict, check_: dict | None, static: list[dict]) -> dict:
-    base = {
+def _base(d: dict, static: list[dict]) -> dict:
+    return {
         "duty": d["id"],
         "feature": d["feature"],
         "law": d["law"],
@@ -543,6 +659,27 @@ def _item(d: dict, first: dict, check_: dict | None, static: list[dict]) -> dict
         "krcore": d.get("krcore", False),
         "static": static,
     }
+
+
+def _goods_item(d: dict, g: dict) -> dict:
+    """품목 신호가 없어 묻지 않은 품목 의무. '해당 여부부터 확인할 것'의 맨 뒤에 한 묶음(group: goods)으로 싣는다."""
+    return {
+        **_base(d, []),
+        "status": "check-applicability",
+        "asked": False,
+        "not_answered": "goods-not-detected",
+        "group": "goods",
+        "first": None,
+        "verification": {"result": "not-run", "why": "goods-not-detected"},
+        "citations": [],
+        "searches": [],
+        "question": f"{g['name']}도 판매하나요? 판매한다면 이 의무가 걸립니다.",
+        "reason": f"{g['name']} 판매에만 걸리는 의무입니다. 코드에서 이 품목의 신호를 찾지 못해 묻지 않았습니다.",
+    }
+
+
+def _item(d: dict, first: dict, check_: dict | None, static: list[dict]) -> dict:
+    base = _base(d, static)
     if not first.get("asked") or "status" not in first:
         why = first.get("why") or "no-answer"
         return {
@@ -560,28 +697,38 @@ def _item(d: dict, first: dict, check_: dict | None, static: list[dict]) -> dict
     status, citations, searches = first["status"], first["citations"], first["searches"]
     why = "business-judgment" if status == "check-applicability" else "no-answer"
     verification = {"result": "not-run", "why": why}
+    overturned = bool(check_) and check_["result"] == "overturned"
     if check_:
         verification = {k: v for k, v in check_.items() if k != "q"}
-        if check_["result"] == "overturned":
+        if overturned:
             status, citations, searches = check_["status"], check_["citations"], check_["searches"]
     return {
         **base,
         "status": status,
         "asked": True,
-        "first": {k: first[k] for k in ("answered", "status", "citations", "searches", "reason", "question")},
+        "first": {k: first[k] for k in FIRST_KEYS},
         "verification": verification,
         "citations": citations,
         "searches": searches,
+        "missing": verification.get("missing", "") if overturned else first["missing"],
         "question": first["question"],
         "reason": first["reason"] if status == first["status"] else verification.get("reason", ""),
     }
 
 
 def arrange(checklist: list[dict]) -> list[dict]:
-    """갈래 순(prompts.ORDER), 그 안에서는 PRIORITY·기능 목록 순, 의무 id 순. rank·status_label 을 붙인다."""
+    """갈래 순(prompts.ORDER), 그 안에서는 묻지 않은 품목 묶음이 맨 뒤, 그 앞은 PRIORITY·기능 목록 순, 기능 안에서는
+    핵심 의무 순(core_key). rank·status_label 을 붙인다."""
     feats = [*PRIORITY, *(f["id"] for f in load_features()["features"] if f["id"] not in PRIORITY)]
     pos = {f: i for i, f in enumerate(feats)}
-    out = sorted(checklist, key=lambda c: (P.ORDER.index(c["status"]), pos.get(c["feature"], 99), c["duty"]))
+    rows = {d["id"]: d for d in load_duties()}
+
+    def key(c: dict) -> tuple:
+        row = rows.get(c["duty"])
+        core = core_key(row) if row else (False, True, True, 0, True, c["duty"])
+        return (P.ORDER.index(c["status"]), c.get("group") == "goods", pos.get(c["feature"], 99), *core)
+
+    out = sorted(checklist, key=key)
     for i, c in enumerate(out, 1):
         c["rank"], c["status_label"] = i, P.STATUS_LABEL[c["status"]]
     return out
@@ -594,8 +741,10 @@ def _blank(fid: str, name: str) -> dict:
     return {"id": fid, "name": name, "sources": [], "evidence": [], "evidence_total": 0, "model_citations": []}
 
 
-def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[dict], list[dict], list[dict]]:
-    """(기능 목록, 목록 층 의무, 검토 층 의무). 기능은 신호 + 이해 단계가 더한 것 − 뺀 것 + 정적 검사가 찾은 것."""
+def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[dict], ...]:
+    """(기능 목록, 목록 층 의무, 검토 층 의무, 묻지 않는 품목 의무). 기능은 신호 + 이해 단계가 더한 것 − 뺀 것 + 정적
+    검사가 찾은 것. 검토 층은 묻는 순서다(PRIORITY·기능 목록 순, 기능 안에서는 core_key). 품목 의무는 프로필에 그
+    품목 신호가 있을 때만 묻는다."""
     spec = load_features()
     names = {f["id"]: f["name"] for f in spec["features"]}
     duties = load_duties()
@@ -635,8 +784,11 @@ def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[d
     review = [
         d for d in listed if d["review_candidate"] or (d.get("krcore") and (static.get(d["id"]) or d["feature"] in ids))
     ]
-    review.sort(key=lambda d: (order.get(d["feature"], rest.get(d["feature"], 99)), d["id"]))
-    return list(features.values()), listed, review
+    goods, seen = _goods(), {g["id"] for g in prof.get("goods") or []}
+    skipped = [d for d in review if d["id"] in goods and goods[d["id"]]["id"] not in seen]
+    review = [d for d in review if d not in skipped]
+    review.sort(key=lambda d: (order.get(d["feature"], rest.get(d["feature"], 99)), *core_key(d)))
+    return list(features.values()), listed, review, skipped
 
 
 def groups_of(review: list[dict], batch: str) -> list[list[dict]]:
@@ -657,11 +809,12 @@ def plan(root: Path, use_static: bool = True) -> dict:
     prof = profile(root)
     static, err = static_results(root) if use_static else ({}, None)
     empty = {"summary": "", "added": [], "removed": []}
-    features, listed, review = select(prof, empty, static)
+    features, listed, review, skipped = select(prof, empty, static)
     return {
         "features": [f["id"] for f in features],
         "listed": len(listed),
         "review": len(review),
+        "goods_not_asked": len(skipped),
         "questions": {b: len(groups_of(review, b)) for b in ("feature", "duty")},
         "static_error": err,
     }
@@ -688,14 +841,15 @@ def review(
     static, static_err = static_results(root) if use_static else ({}, None)
     catalog = {f["id"]: f["name"] for f in load_features()["features"]}
     und = from_previous(root, reuse, catalog) if reuse is not None else understand(run, prof, catalog)
-    features, listed, review_duties = select(prof, und, static)
+    features, listed, review_duties, skipped = select(prof, und, static)
     by_feature = {f["id"]: f for f in features}
     groups = groups_of(review_duties, limits.batch)
     plats = _platforms(prof)
 
     def work(group: list[dict]) -> tuple[dict, dict]:
-        first = investigate(run, group, by_feature.get(group[0]["feature"]), und["summary"], static, plats)
-        return first, rebut(run, group, first, und["summary"], plats)
+        feature = by_feature.get(group[0]["feature"])
+        first = investigate(run, group, feature, und["summary"], static, plats)
+        return first, rebut(run, group, first, und["summary"], plats, feature)
 
     firsts: dict[str, dict] = {}
     checks: dict[str, dict] = {}
@@ -704,8 +858,10 @@ def review(
             firsts |= first
             checks |= chk
 
+    goods = _goods()
     checklist = arrange(
         [_item(d, firsts.get(d["id"], {}), checks.get(d["id"]), static.get(d["id"], [])) for d in review_duties]
+        + [_goods_item(d, goods[d["id"]]) for d in skipped]
     )
     seconds = time.monotonic() - t0
     return _report(run, prof, und, features, listed, checklist, static, static_err, seconds, throttles)
@@ -713,7 +869,8 @@ def review(
 
 def _report(run: Run, prof, und, features, listed, checklist, static, static_err, seconds, throttles) -> dict:
     in_checklist = {c["duty"] for c in checklist}
-    cites = [c for q in checklist for c in (q["first"] or {}).get("citations", [])]
+    # 모델이 댄 인용만 센다(조건의 근거로 붙인 프로필 신호 why: profile 은 빼고)
+    cites = [c for q in checklist for c in (q["first"] or {}).get("citations", []) if c["why"] != "profile"]
     searches = [s for q in checklist for s in (q["first"] or {}).get("searches", [])]
     searches += [s for q in checklist for s in q["verification"].get("searches", [])]
     cites += [c for q in checklist for c in q["verification"].get("citations", [])]
@@ -740,6 +897,11 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
             "counts": counts,
             "labels": P.STATUS_LABEL,
             "top": [c["duty"] for c in checklist[:5]],
+            "groups": [
+                {"id": "goods", "label": GOODS_LABEL, "status": "check-applicability", "duties": goods}
+                for goods in [[c["duty"] for c in checklist if c.get("group") == "goods"]]
+                if goods
+            ],
         },
         "profile": {
             "commit": commit_of(run.root),
@@ -747,6 +909,7 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
             "summary": und["summary"],
             "features": features,
             "test_only": prof["test_only"],
+            "goods": prof.get("goods", []),
             "files": prof["files"],
         },
         "data_flow": {"nodes": und["nodes"], "edges": und["edges"]},

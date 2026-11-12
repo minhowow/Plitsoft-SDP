@@ -21,6 +21,8 @@
 
 검토 층 후보 = 대조 pass · confidence high · scope general 또는 domain · 기능이 있다('지위'가 아니다).
 검토 층 후보와 내장 팩(kr-core)이 다루는 의무에는 질문에 넣을 글(걸리는 신호·위반 모양·지킨 모양·주체)을 함께 싣는다.
+freq 는 의무 지도의 흔함 측정(9/30 코퍼스 dev 저장소 20개 가운데 그 의무의 신호 정규식이 걸린 저장소 수)이다. review 가
+기능 안에서 묻는 순서(일반 범위 → 흔한 것 → 확신 높은 것)에 쓴다.
 """
 
 from __future__ import annotations
@@ -157,6 +159,7 @@ def main(argv: list[str]) -> int:
                 "scope": d["scope"],
                 "scope_note": d["scope_note"],
                 "confidence": d["confidence"],
+                "freq": (d.get("freq") or {}).get("repos_hit"),
                 "detect": d["detect"],
                 "quote": d["quote"],
                 "quote_check": check,

@@ -89,6 +89,7 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 | `test_only[]` | 시험·픽스처·설정 파일에서만 본 기능 신호. 기능으로 세지 않는다 |
 | `files`, `totals` | 본 파일 수(서비스 코드 / 시험·설정, package.json), 기능·의무·후보 합계 |
 | `platforms` | web·mobile·server. 모바일 앱 틀(react-native·expo 등)만 있으면 화면 파일이 있어도 웹이 아니어서 `web-ui` 기능이 없다 |
+| `goods[]` | 특정 품목(주류·도서·안경·전기용품·농수산물·청소년유해약물)의 신호(경로 낱말, 소스 글의 낱말 `word`)와 그 품목에만 걸리는 의무 id(`duties`). 11/12 부터 |
 
 기능과 신호는 `src/policypack/profile/features.yaml`, 기능–의무 표는 `src/policypack/profile/duties.jsonl`(만드는 법은
 `scripts/lawmap_table.py`)에 있다.
@@ -104,27 +105,33 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 
 | 키 | 뜻 |
 |---|---|
-| `summary` | 체크리스트의 갈래별 수(`counts`), 갈래 이름(`labels`), 맨 위 다섯 건의 의무 id(`top`) |
-| `profile` | 커밋(`commit`), 플랫폼(`platforms`: web·mobile·server), 서비스 요약, 기능(`sources`: signal·model·static, 모델이 더한 근거 `model_citations`, 인용과 함께 뺀 것은 `removed`) |
+| `summary` | 체크리스트의 갈래별 수(`counts`), 갈래 이름(`labels`), 맨 위 다섯 건의 의무 id(`top`), 한 줄로 묶어 보일 항목(`groups`: 품목 신호가 없어 묻지 않은 품목 의무, `id` goods) |
+| `profile` | 커밋(`commit`), 플랫폼(`platforms`: web·mobile·server), 서비스 요약, 기능(`sources`: signal·model·static, 모델이 더한 근거 `model_citations`, 인용과 함께 뺀 것은 `removed`), 품목 신호(`goods`) |
 | `data_flow` | 개인정보 흐름. `nodes[]`(input·server·store·external, 다루는 항목 `data`, 인용) 와 `edges[]`(from→to). 인용이 관문을 통과한 것만 |
 | `obligations.listed[]` | 목록 층: 감지된 기능과 거의 모든 서비스에 걸릴 수 있는 의무. `in_checklist` 는 검토 층에 들었는지 |
-| `checklist[]` | 검토 층. 이미 갈래 순으로 늘어서 있고 `rank` 가 1 부터다. 의무마다 `status`·`status_label`, 인용 `citations`, 부재를 보인 검색 `searches`, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 `verification`(upheld · overturned · overturn-ungrounded · not-run, 조문 밖 요건이었는지 `off_quote`), 내장 팩 정적 결과 `static` |
+| `checklist[]` | 검토 층. 이미 갈래 순으로 늘어서 있고 `rank` 가 1 부터다. 의무마다 `status`·`status_label`, 인용 `citations`, 부재를 보인 검색 `searches`, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 `verification`(upheld · overturned · overturn-ungrounded · not-run, 조문 밖 요건이었는지 `off_quote`), 내장 팩 정적 결과 `static`, 조건은 있는데 없는 지킨 처리 `missing`(예: "약관 고지 화면이 없음"), 묻지 않은 품목 의무의 묶음 `group`(goods) |
+| `first`·`verification` 의 덧붙임(11/12) | 답이 적은 걸리는 조건 `applies`(예·아니오·모름)·`condition`, 없는 것 `missing`, 충족 인용의 성격 `shows`(행위·이름·기본값), 관문이 답을 바꾼 까닭 `gate`(`why`: condition-present · no-condition · name-or-default, `note` 는 `reason` 앞에도 붙는다). 인용의 `why` 가 `profile` 이면 모델의 인용이 아니라 기능이 있다는 프로필 신호(걸리는 조건의 근거)다 |
 | `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(보수 단가), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 검색과 다시 돌려 맞지 않은 수, 못 물은 의무(`not_asked`), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
 
 상태(갈래 순):
 
 | status | 이름 | 받는 조건 |
 |---|---|---|
-| `seen-in-code` | 확인할 것 — 코드에서 본 것 | 의무가 걸리는 처리의 인용이 관문을 통과했다. 지킨 근거는 찾지 못했다 |
+| `seen-in-code` | 확인할 것 — 코드에서 본 것 | 걸리는 조건의 인용이 관문을 통과했다. 지킨 근거는 찾지 못했다(`missing`). 조건은 있는데 지킨 처리가 없다는 '해당 없음', 그 기능이 있으면 걸리는 의무(`features.yaml` 의 `whenever`)에 기능이 있는데 낸 '해당 없음', 이름·기본값뿐인 '충족'도 여기로 온다 |
 | `check-outside` | 확인할 것 — 저장소 밖에서 | 배포 설정·처리방침·저장소에 없는 서버를 봐야 한다. 인용이 관문을 통과하지 못한 '코드에서 본 것'·'충족'도 여기로 온다 |
-| `check-applicability` | 확인할 것 — 해당 여부부터 | 걸리는지가 사업자의 판단이다(고영향 AI, 사내 도구, 업종). 반박하지 않는다 |
+| `check-applicability` | 확인할 것 — 해당 여부부터 | 걸리는지가 사업자의 판단이다(고영향 AI, 사내 도구, 업종). 반박하지 않는다. 걸리는 조건이 없다는 말 없이 낸 '해당 없음', 품목 신호가 없어 묻지 않은 품목 의무(`not_answered` goods-not-detected, 갈래의 맨 뒤)도 여기다 |
 | `unknown` | 모름(묻지 못함) | 상한·실패로 답이 없다. `not_answered` 에 까닭 |
-| `evidence-found` | 충족 근거 있음 | 조문의 요건을 지킨 줄의 인용이 관문을 통과했다 |
-| `likely-not-applicable` | 걸리지 않는 것으로 보임(확인 안 됨) | 모델은 해당 없음이라 했지만 검색 증명이 없거나 맞지 않았다. 확인 목록에 올리지 않는다 |
-| `not-applicable` | 해당 없음(검색으로 확인) | 모델이 낸 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같았다 |
+| `evidence-found` | 충족 근거 있음 | 조문이 요구하는 행위 자체를 보이는 줄(`shows` 행위)의 인용이 관문을 통과했다 |
+| `likely-not-applicable` | 걸리지 않는 것으로 보임(확인 안 됨) | 걸리는 조건 자체가 없다고 했지만(`applies` 아니오·`condition`) 검색 증명이 없거나 맞지 않았다. 확인 목록에 올리지 않는다 |
+| `not-applicable` | 해당 없음(검색으로 확인) | 걸리는 조건 자체가 없다고 했고(`applies` 아니오·`condition`), 그 조건을 찾은 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같았다 |
 
 - 인용은 시험·설정 파일의 줄이면 받지 않는다. 질문에 넣는 요건은 조문 인용에 있는 것만이다.
-- 반박이 뒤집을 때도 같은 조건(있다는 말은 인용, 없다는 말은 검색)을 넘어야 받는다.
+- 반박이 뒤집을 때도 같은 조건(있다는 말은 인용, 없다는 말은 걸리는 조건이 없다는 답과 검색, 충족은 행위 자체의 인용)을
+  넘어야 받는다.
+- 묻는 순서와 체크리스트의 같은 갈래 안 순서: 기능은 거의 모든 서비스·가입·AI·외부 전송이 먼저, 기능 안에서는 일반 범위 →
+  그 기능이 있으면 걸리는 의무 → 흔한 것(의무 표의 `freq`) → 확신 높은 것이고 품목 의무가 맨 뒤다. 금액 상한에 걸려도
+  핵심 의무는 묻는다.
+- 검색 도구는 결과를 60줄에서 잘라 보여 줄 때 맞는 줄의 전체 수를 함께 알려 주고, 관문은 그 전체 수와 맞춰 본다.
 
 ## 아직 없는 것
 

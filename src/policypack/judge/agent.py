@@ -62,7 +62,10 @@ TOOLS = [
     },
     {
         "name": "search",
-        "description": f"저장소에서 정규식(대소문자 무시)으로 찾는다. 결과는 '경로:줄: 내용' 꼴로 {SEARCH_HITS}개까지.",
+        "description": (
+            f"저장소에서 정규식(대소문자 무시)으로 찾는다. 결과는 '경로:줄: 내용' 꼴로 {SEARCH_HITS}개까지 보이고, "
+            "넘으면 맞는 줄의 전체 수를 함께 알려 준다."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}},
@@ -230,7 +233,7 @@ class RepoTools:
         except re.error as e:
             return f"정규식 오류: {e}"
         self.searched.append(pattern)
-        hits = []
+        hits, total = [], 0
         for f in self._walk(self._path(path)):
             rel = f.relative_to(self.root).as_posix()
             if is_secret_file(rel):
@@ -241,17 +244,22 @@ class RepoTools:
                 text = f.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            raw = text.splitlines()
-            shown = self._masked_lines(text)
-            if len(shown) != len(raw):  # 가린 글의 줄이 어긋나면(줄 바꿈 문자가 섞인 비밀값) 줄마다 가린다
-                shown = [mask(line)[0] for line in raw]
+            raw, shown = text.splitlines(), None
             for i, line in enumerate(raw, 1):
-                if rx.search(line):
+                if not rx.search(line):
+                    continue
+                total += 1
+                if len(hits) < SEARCH_HITS:  # 보여 주는 줄만 밖으로 나간다(matched). 나머지는 세기만 한다
+                    if shown is None:
+                        shown = self._masked_lines(text)
+                        if len(shown) != len(raw):  # 가린 글의 줄이 어긋나면(줄 바꿈 문자가 섞인 비밀값) 줄마다 가린다
+                            shown = [mask(x)[0] for x in raw]
                     hits.append(f"{rel}:{i}: {shown[i - 1].strip()[:200]}")
                     if rel not in self.matched:
                         self.matched.append(rel)
-                    if len(hits) >= SEARCH_HITS:
-                        return self._out("\n".join(hits) + f"\n… ({SEARCH_HITS}개에서 자름)")
+        if total > len(hits):
+            # 11/12 실측: 잘린 결과를 본 모델이 줄 수를 60 으로 적어 부재 증명의 검색 거절 213건 중 83건이 이것이었다
+            return self._out("\n".join(hits) + f"\n… ({SEARCH_HITS}개에서 자름. 맞는 줄은 모두 {total}개)")
         return self._out("\n".join(hits)) or "(찾은 것 없음)"
 
     def count(self, pattern: str, path: str = ".") -> int:

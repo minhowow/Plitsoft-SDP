@@ -102,3 +102,36 @@ def test_call_signals_count_only_code_and_urls_only_at_the_start_of_a_string(tmp
     ev = {(e["signal"], e["value"], e["file"], e["line"]) for e in found["genai"]["evidence"]}
     assert ("url", "api.openai.com", "src/ask.ts", 2) in ev and ("call", "responses.create", "src/ask.ts", 3) in ev
     assert not any(e[2] == "src/story.ts" for e in ev)
+
+
+def test_whenever_and_goods_point_at_review_candidates_of_one_feature():
+    """그 기능이 있으면 걸리는 의무(whenever)는 그 기능의 검토 층 후보다. 품목 의무(goods)도 검토 층 후보이고,
+    품목 id 는 기능 id 와 겹치지 않는다."""
+    spec = load_features()
+    rows = {d["id"]: d for d in load_duties()}
+    for f in spec["features"]:
+        for did in f.get("whenever") or []:
+            assert rows[did]["feature"] == f["id"] and rows[did]["review_candidate"], did
+    ids = {f["id"] for f in spec["features"]}
+    for g in spec["goods"]:
+        assert g["id"] not in ids and g["duties"]
+        for did in g["duties"]:
+            assert rows[did]["review_candidate"] and rows[did]["feature"] == "commerce", did
+    assert all(isinstance(d["freq"], int) for d in rows.values() if d["review_candidate"])
+
+
+def test_goods_come_from_path_words_and_words_in_the_code(tmp_path):
+    """품목 신호: 경로 낱말(bookstore 등)과 소스의 글에 그대로 있는 낱말(화면 문구의 '와인').
+    bookmark 는 도서가 아니다."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "bookMarkController.ts").write_text("export const save = () => 1;\n")
+    assert profile(tmp_path)["goods"] == []
+    (tmp_path / "src" / "menu.ts").write_text('export const MENU = [\n  "치즈",\n  "레드 와인",\n];\n')
+    (tmp_path / "src" / "bookstore").mkdir()
+    (tmp_path / "src" / "bookstore" / "list.ts").write_text("export const list = [];\n")
+    goods = {g["id"]: g for g in profile(tmp_path)["goods"]}
+    assert set(goods) == {"liquor", "youth-harmful", "books"}
+    assert goods["liquor"]["evidence"][0] == {
+        "file": "src/menu.ts", "line": 3, "signal": "word", "value": "와인", "what": "글에 '와인'"
+    }  # fmt: skip
+    assert goods["books"]["duties"] == ["publishing-22-3", "publishing-22-4", "publishing-22-5"]
