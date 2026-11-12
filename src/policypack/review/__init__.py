@@ -10,12 +10,17 @@
      충족 근거 있음        인용이 관문을 통과해야 한다. 아니면 '저장소 밖에서 확인할 것'
      코드에서 본 것        걸리는 처리의 인용이 관문을 통과해야 한다. 아니면 '저장소 밖에서 확인할 것'
      저장소 밖에서 확인할 것 · 해당 여부부터 확인할 것   그대로
-     해당 없음             걸리는 조건 자체가 없다는 답(applies '아니오'와 condition)이어야 하고, 찾아본 검색(정규식·
-                           줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같아야 한다(부재의 증명). 증명이 없으면 '걸리지
-                           않는 것으로 보임(확인 안 됨)'이고 확인 목록에 올리지 않는다. 조건은 있는데 지킨 처리만
-                           없다는 답과, 그 기능이 있으면 걸리는 의무(features.yaml 의 whenever)에 기능이 있는 경우는
-                           '코드에서 본 것', 조건을 말하지 않았으면 '해당 여부부터 확인할 것'이다(gate)
+     해당 없음             걸리는 조건 자체가 없다는 답(applies '아니오', condition, basis '처리 없음')이어야
+                           하고, 찾아본 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같아야 한다(부재의
+                           증명). 증명이 없으면 '걸리지 않는 것으로 보임(확인 안 됨)'이고 확인 목록에 올리지 않는다.
+                           조건은 있는데 지킨 처리만 없다는 답과, 그 기능이 있으면 걸리는 의무(features.yaml 의
+                           whenever)에 기능이 있는 경우는 '코드에서 본 것', 조건을 말하지 않았으면 '해당 여부부터
+                           확인할 것'이다(gate). 나이·본인·지역을 확인하는 장치가 없다는 것은 조건이 없다는 증명이
+                           아니다: 이용자가 누구인지에 걸리는 의무(features.yaml 의 audience)와 그것을 근거로 든 답
+                           (basis '확인 장치 없음')은 '해당 여부부터 확인할 것'
      충족(덧붙임)          인용이 조문이 요구하는 행위 자체여야 한다(shows '행위'). 이름·기본값뿐이면 '코드에서 본 것'
+     걸리는지 모름         '확인할 것'이라도 applies '모름'이면 '해당 여부부터 확인할 것'(그 기능이 있으면 걸리는
+                           의무는 빼고)
    시험·설정 파일의 줄은 인용으로 받지 않는다. 요건은 조문 인용에 있는 것만 묻는다.
    특정 품목(주류·도서 등, features.yaml 의 goods) 의무는 프로필에 그 품목 신호가 없으면 묻지 않고 '해당 여부부터
    확인할 것'에 한 묶음(group: goods)으로 싣는다.
@@ -205,6 +210,11 @@ def _whenever() -> dict[str, str]:
     return {d: f["id"] for f in load_features()["features"] for d in f.get("whenever") or []}
 
 
+def _audience() -> dict[str, str]:
+    """이용자가 누구인지(나이·본인·지역)에 걸리는 의무 → 기능 id (features.yaml 의 audience)."""
+    return {d: f["id"] for f in load_features()["features"] for d in f.get("audience") or []}
+
+
 def _goods() -> dict[str, dict]:
     """특정 품목을 팔 때만 걸리는 의무 → 그 품목(features.yaml 의 goods)."""
     return {d: g for g in load_features().get("goods") or [] for d in g["duties"]}
@@ -241,10 +251,11 @@ def _feature_citations(root: Path, feature: dict) -> list[dict]:
 
 
 def said(r: dict) -> dict:
-    """답이 적은 걸리는 조건(applies·condition), 없는 것(missing), 충족 인용의 성격(shows)."""
+    """답이 적은 걸리는 조건(applies·condition·basis), 없는 것(missing), 충족 인용의 성격(shows)."""
     return {
         "applies": r.get("applies") if r.get("applies") in P.APPLIES else None,
         "condition": str(r.get("condition") or "").strip()[:300],
+        "basis": r.get("basis") if r.get("basis") in P.BASIS else None,
         "missing": str(r.get("missing") or "").strip()[:300],
         "shows": r.get("shows") if r.get("shows") in P.SHOWS else None,
     }
@@ -263,10 +274,32 @@ def absent(d: dict, s: dict, proven: bool, feature: dict | None, cited: bool) ->
         note += " '해당 없음'으로 받지 않았습니다. 지킨 처리는 찾지 못했습니다"
         gate_ = {"from": "not-applicable", "why": "condition-present", "note": _missing(note, s)}
         return ("seen-in-code" if cited else "check-applicability"), gate_
-    if s["applies"] != "아니오" or not s["condition"]:
-        note = "걸리는 조건 자체가 없다는 답(applies '아니오'와 condition)이 없어 '해당 없음'으로 받지 않았습니다."
+    # 나이·본인·지역을 확인하는 장치가 없다는 것은 그런 이용자가 없다는 증명이 아니다(11/12 재실행: 나이 확인이 없는
+    # 가입을 '아동 동의 해당 없음'으로 읽었다). 이용자가 누구인지에 걸리는 의무(audience)는 답과 상관없이, 다른 의무는
+    # 답이 그것을 근거로 들 때(basis '확인 장치 없음') 해당 여부부터다
+    if d["id"] in _audience() or s["basis"] == "확인 장치 없음":
+        note = "나이·본인·지역을 확인하는 장치가 없다는 것은 그런 이용자가 없다는 증명이 아니라"
+        note += " '해당 없음'으로 받지 않았습니다."
+        if d["id"] not in _audience():
+            return "check-applicability", {"from": "not-applicable", "why": "missing-check", "note": note}
+        who = "이용자가 누구인지(아동·미성년자·청소년)에 걸리는 의무라 코드만으로는 '해당 없음'을 받지 않았습니다."
+        note = f"{who} {note}"
+        return "check-applicability", {"from": "not-applicable", "why": "audience", "note": note}
+    if s["applies"] != "아니오" or not s["condition"] or s["basis"] != "처리 없음":
+        note = "걸리는 조건 자체가 없다는 답(applies '아니오', condition, basis '처리 없음')이 없어"
+        note += " '해당 없음'으로 받지 않았습니다."
         return "check-applicability", {"from": "not-applicable", "why": "no-condition", "note": note}
     return ("not-applicable" if proven else "likely-not-applicable"), None
+
+
+def unknown(d: dict, s: dict, answered: str, feature: dict | None) -> dict | None:
+    """걸리는지 모른다고 답한 '확인할 것'(applies '모름')은 해당 여부부터다(11/12 재실행: 외부 AI 호출을 '제3자
+    제공'으로 보고 "제공인지 위탁인지는 개발자 판단"이라면서 '코드에서 본 것'에 뒀다). 그 기능이 있으면 걸리는 의무는
+    그대로 둔다. 관문이 바꾼 까닭 또는 None."""
+    if s["applies"] != "모름" or (d["id"] in _whenever() and _present(feature)):
+        return None
+    note = "걸리는지 모른다고 답해(applies '모름') '해당 여부부터 확인할 것'으로 옮겼습니다."
+    return {"from": answered, "why": "applies-unknown", "note": note}
 
 
 def _missing(note: str, s: dict) -> str:
@@ -277,6 +310,8 @@ def accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, featur
     """모델이 고른 상태에 받는 조건을 건다. (상태, 관문이 바꾼 까닭 또는 None)"""
     if answered == "not-applicable":
         return absent(d, s, proven, feature, grounded(cs))
+    if answered in TO_CHECK and (gate_ := unknown(d, s, answered, feature)):
+        return "check-applicability", gate_
     if answered in ("evidence-found", "seen-in-code") and not grounded(cs):
         return "check-outside", None
     if answered == "evidence-found" and s["shows"] != "행위":
@@ -656,7 +691,8 @@ def rebut(
         # 빼는 답을 깨면 '코드에서 본 것'(인용 필요). 확인할 것을 깨면 충족(행위 자체를 보이는 인용) 또는 해당
         # 없음(걸리는 조건이 없다는 답과 검색 증명)이다. 해당 없음은 조사 답과 같은 관문(absent)을 넘어야 받는다
         if before in DROPS:
-            after, ok = "seen-in-code", grounded(cs)
+            rec["gate"] = unknown(by_id[r["duty"]], s, "seen-in-code", feature)
+            after, ok = ("check-applicability" if rec["gate"] else "seen-in-code"), grounded(cs)
         elif claimed == "evidence-found":
             after, ok = claimed, grounded(cs) and s["shows"] == "행위"
         else:

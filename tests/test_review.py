@@ -48,7 +48,7 @@ FAKE = {"file": "src/routes/signup.ts", "line": 2, "text": "verifyGuardianConsen
 TEST_LINE = {"file": "tests/signup.test.ts", "line": 2, "text": 'expect(signup({ birthDate: "2015-01-01" }))'}
 ABSENT = {"pattern": "주민등록번호|residentNumber", "path": ".", "hits": 0}
 PRESENT_BUT_CLAIMED_ZERO = {"pattern": "birthDate", "path": ".", "hits": 0}
-NO_CONDITION = {"applies": "아니오", "condition": "주민등록번호를 받지 않는다"}
+NO_CONDITION = {"applies": "아니오", "condition": "주민등록번호를 받지 않는다", "basis": "처리 없음"}
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -184,7 +184,7 @@ def fake_checker(log: list):
 def _run(root: Path, batch: str, **kw) -> tuple[dict, list]:
     log: list = []
     inv = AgentJudge("claude-haiku-5-5", kw.pop("investigator", None) or fake_investigator())
-    chk = AgentJudge("claude-sonnet-5-5", fake_checker(log))
+    chk = AgentJudge("claude-sonnet-5-5", kw.pop("checker", None) or fake_checker(log))
     limits = rv.Limits(usd=kw.pop("usd", 5.0), seconds=300, concurrency=2, batch=batch)
     return rv.review(root, inv, chk, limits, throttles=(rv.Throttle(2), rv.Throttle(2)), **kw), log
 
@@ -226,13 +226,16 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
             if whenever.get(i["duty"]) in live:
                 assert f["status"] == "seen-in-code" and f["gate"]["why"] == "condition-present"
                 assert any(c["ok"] for c in f["citations"]) and f["reason"].startswith(feats[i["feature"]]["name"])
+            elif i["duty"] in rv._audience():  # 이용자가 누구인지에 걸리는 의무는 코드만으로 해당 없음이 아니다
+                assert f["status"] == "check-applicability" and f["gate"]["why"] == "audience"
             else:
                 assert f["status"] == ("not-applicable" if proven else "likely-not-applicable") and f["gate"] is None
     whys = {s["why"] for f in firsts for s in f["searches"]}
     assert {"match", "mismatch"} <= whys
     mismatch = next(s for f in firsts for s in f["searches"] if s["why"] == "mismatch")
     assert mismatch["claimed"] == 0 and mismatch["found"] > 0
-    assert {f["status"] for f in firsts} >= {"check-outside", "likely-not-applicable", "not-applicable", "seen-in-code"}
+    # 이 픽스처에서 '걸리지 않는 것으로 보임'이 될 의무는 아동 동의(audience)뿐이라 해당 여부부터다(반박 시험에서 본다)
+    assert {f["status"] for f in firsts} >= {"check-outside", "check-applicability", "not-applicable", "seen-in-code"}
 
     # 반박: 해당 여부는 묻지 않고, 뒤집기는 인용·검색 조건을 넘은 것만
     for i in items:
@@ -254,7 +257,7 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
         v = i["verification"]
         if v["result"] == "overturn-ungrounded" and v.get("status") == "not-applicable":
             assert whenever.get(i["duty"]) in live and v["gate"]["why"] == "condition-present"
-    assert not any("확인할 것(해당 여부)" in p for p in log)
+    assert not any(f"앞 판단: {P.SAID['check-applicability']}" in p for p in log)  # 해당 여부는 반박하지 않는다
 
     # 순서: 갈래 순, rank 는 1부터, summary 의 맨 위 다섯 건
     order = [P.ORDER.index(i["status"]) for i in items]
@@ -382,7 +385,14 @@ def test_not_applicable_needs_the_condition_itself_to_be_absent():
     아예 없는 가입, 탈퇴 경로가 없는 쇼핑몰, 철회 기능이 없는 위치 서비스를 해당 없음으로 읽었다)."""
     signup = {"id": "signup", "name": "회원 가입·개인정보 수집", "evidence": [], "model_citations": []}
     terms, sensitive = _duty("tcra-3-2"), _duty("pipa-23-1")
-    no = rv.said({"applies": "아니오", "condition": "약관을 쓰지 않는다", "missing": "약관 고지 화면이 없음"})
+    no = rv.said(
+        {
+            "applies": "아니오",
+            "condition": "약관을 쓰지 않는다",
+            "missing": "약관 고지 화면이 없음",
+            "basis": "처리 없음",
+        }
+    )
 
     # 그 기능이 있으면 걸리는 의무: 기능이 있으면 증명된 검색이 있어도 해당 없음이 아니다
     status, gate = rv.absent(terms, no, True, signup, False)
@@ -394,12 +404,95 @@ def test_not_applicable_needs_the_condition_itself_to_be_absent():
     assert rv.absent(sensitive, yes, True, None, True)[0] == "seen-in-code"
     assert rv.absent(sensitive, yes, True, None, False)[0] == "check-applicability"
     # 걸리는 조건이 없다는 말이 없으면 해당 여부부터
-    for s in ({}, {"applies": "모름", "condition": "x"}, {"applies": "아니오"}):
+    for s in (
+        {},
+        {"applies": "모름", "condition": "x"},
+        {"applies": "아니오"},
+        {"applies": "아니오", "condition": "x"},
+    ):
         status, gate = rv.absent(sensitive, rv.said(s), True, None, False)
         assert status == "check-applicability" and gate["why"] == "no-condition"
     # 조건이 없고 검색이 증명되면 해당 없음, 아니면 걸리지 않는 것으로 보임
     assert rv.absent(sensitive, no, True, None, False) == ("not-applicable", None)
     assert rv.absent(sensitive, no, False, None, False) == ("likely-not-applicable", None)
+
+
+def test_a_missing_check_does_not_prove_the_condition_is_absent():
+    """나이·본인·지역을 확인하는 장치가 없다는 것은 그런 이용자가 없다는 증명이 아니다(11/12 재실행: 나이 확인이 없는
+    가입을 '아동 동의 해당 없음'으로 읽었다). 이용자가 누구인지에 걸리는 의무(audience)는 답과 상관없이, 다른 의무는
+    답이 그것을 근거로 들 때 '해당 여부부터'다."""
+    signup = {"id": "signup", "name": "회원 가입·개인정보 수집", "evidence": [], "model_citations": []}
+    kid, sensitive = _duty("pipa-22-2-1"), _duty("pipa-23-1")
+    assert rv._audience()["pipa-22-2-1"] == "signup"
+    no_age_check = {"applies": "아니오", "condition": "나이를 받아 14세 미만을 가르는 가입 흐름이 없음"}
+    for basis in ("처리 없음", "확인 장치 없음"):
+        for feature in (signup, None):
+            status, gate = rv.absent(kid, rv.said({**no_age_check, "basis": basis}), True, feature, False)
+            assert status == "check-applicability" and gate["why"] == "audience" and "증명이 아니" in gate["note"]
+    status, gate = rv.absent(sensitive, rv.said({**no_age_check, "basis": "확인 장치 없음"}), True, None, False)
+    assert status == "check-applicability" and gate["why"] == "missing-check"
+    no = rv.said({"applies": "아니오", "condition": "민감정보 입력란이 없다", "basis": "처리 없음"})
+    assert rv.absent(sensitive, no, True, None, False) == ("not-applicable", None)
+    assert all("확인 장치 없음" in t for t in (P.CONDITION, P.INVESTIGATE, P.REBUT))
+
+
+def test_an_unknown_applicability_goes_to_check_applicability(tmp_path):
+    """걸리는지 모른다고 답한 '확인할 것'은 '해당 여부부터 확인할 것'이다(11/12 재실행: 외부 AI 호출을 '제3자 제공'으로
+    보고 "제공인지 위탁인지는 개발자 판단"이라면서 '코드에서 본 것'에 뒀다). 그 기능이 있으면 걸리는 의무는 그대로다."""
+    ok = [{"file": "a.ts", "line": 1, "text": "x", "ok": True, "why": "grounded"}]
+    signup = {"id": "signup", "name": "회원 가입·개인정보 수집", "evidence": [], "model_citations": []}
+    third, terms = _duty("pipa-17-2"), _duty("tcra-3-2")
+    unsure = rv.said({"applies": "모름", "condition": "대화를 외부 AI 로 보낸다"})
+    for answered in ("seen-in-code", "check-outside"):
+        status, gate = rv.accept(third, unsure, answered, ok, False, None)
+        assert status == "check-applicability" and gate == {**gate, "from": answered, "why": "applies-unknown"}
+    assert rv.accept(terms, unsure, "seen-in-code", ok, False, signup) == ("seen-in-code", None)
+    assert rv.accept(third, rv.said({"applies": "예"}), "seen-in-code", ok, False, None) == ("seen-in-code", None)
+
+    # 전체 경로: 조사 답이 모두 '모름'이면 기능이 있으면 걸리는 의무 말고는 해당 여부부터, 반박하지 않는다
+    def unsure_answer(_duty_id):
+        return ("확인할 것(코드에서 본 것)", [STORE], [], {"applies": "모름", "condition": "가입을 받는다"})
+
+    doc, log = _run(_repo(tmp_path), "duty", use_static=False, investigator=fake_investigator(unsure_answer))
+    _valid(doc)
+    live = {f["id"] for f in doc["profile"]["features"] if "removed" not in f}
+    whenever = rv._whenever()
+    for i in doc["checklist"]:
+        if not i["asked"]:
+            continue
+        if whenever.get(i["duty"]) in live:
+            assert i["first"]["status"] == "seen-in-code", i["duty"]
+        else:
+            assert i["status"] == "check-applicability" and i["first"]["gate"]["why"] == "applies-unknown", i["duty"]
+            assert i["verification"] == {"result": "not-run", "why": "business-judgment"}
+
+    # 반박이 빼는 답을 깨면 '코드에서 본 것', 그러면서 걸리는지 모른다고 하면 해당 여부부터
+    def drop(_duty_id):
+        return ("해당 없음", [], [PRESENT_BUT_CLAIMED_ZERO], NO_CONDITION)
+
+    def split_checker(body):
+        out = []
+        for d in re.findall(r"^- \[([^\]]+)\]", _text(body), re.M):
+            unsure = zlib.crc32(d.encode()) % 2 == 0
+            status = "확인할 것(해당 여부)" if unsure else "확인할 것(코드에서 본 것)"
+            applies = "모름" if unsure else "예"
+            out.append({"duty": d, "result": "뒤집음", "status": status, "applies": applies, "citations": [STORE]})
+        return _reply({"results": out})
+
+    doc, _ = _run(
+        _repo(tmp_path), "duty", use_static=False, investigator=fake_investigator(drop), checker=split_checker
+    )
+    _valid(doc)
+    flipped = [i for i in doc["checklist"] if i["verification"]["result"] == "overturned"]
+    assert flipped and all(i["first"]["status"] == "likely-not-applicable" for i in flipped)
+    unsure = [i for i in flipped if i["verification"]["applies"] == "모름"]
+    sure = [i for i in flipped if i["verification"]["applies"] == "예"]
+    assert unsure and sure
+    assert all(i["status"] == "check-applicability" for i in unsure)
+    assert all(i["verification"]["gate"]["why"] == "applies-unknown" for i in unsure)
+    assert all(i["status"] == "seen-in-code" and i["verification"]["gate"] is None for i in sure)
+    kid = next(i for i in doc["checklist"] if i["duty"] == "pipa-22-2-1")  # 조사 답부터 해당 여부(audience)
+    assert kid["status"] == "check-applicability" and kid["first"]["gate"]["why"] == "audience"
 
 
 def test_evidence_must_show_the_act_not_a_name_or_a_default():
@@ -430,6 +523,8 @@ def test_the_rebuttal_passes_the_same_gate(tmp_path):
     flipped = [i for i in items.values() if i["verification"]["result"] == "overturned"]
     assert flipped and all(i["status"] == "not-applicable" for i in flipped)
     assert all(i["duty"] != "tcra-3-2" for i in flipped)
+    kid = items["pipa-22-2-1"]  # 이용자가 누구인지에 걸리는 의무 → 해당 없음으로 뒤집지 못한다
+    assert kid["status"] == "check-outside" and kid["verification"]["gate"]["why"] == "audience"
     assert all("이름·기본값" in p and "걸리는 조건인지 지킨 처리인지" in p for p in log)
 
 

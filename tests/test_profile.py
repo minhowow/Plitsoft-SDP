@@ -105,13 +105,15 @@ def test_call_signals_count_only_code_and_urls_only_at_the_start_of_a_string(tmp
 
 
 def test_whenever_and_goods_point_at_review_candidates_of_one_feature():
-    """그 기능이 있으면 걸리는 의무(whenever)는 그 기능의 검토 층 후보다. 품목 의무(goods)도 검토 층 후보이고,
+    """그 기능이 있으면 걸리는 의무(whenever)와 이용자가 누구인지에 걸리는 의무(audience)는 그 기능의 검토 층
+    후보다(둘은 겹치지 않는다). 품목 의무(goods)도 검토 층 후보이고,
     품목 id 는 기능 id 와 겹치지 않는다."""
     spec = load_features()
     rows = {d["id"]: d for d in load_duties()}
     for f in spec["features"]:
-        for did in f.get("whenever") or []:
+        for did in [*(f.get("whenever") or []), *(f.get("audience") or [])]:
             assert rows[did]["feature"] == f["id"] and rows[did]["review_candidate"], did
+        assert not set(f.get("whenever") or []) & set(f.get("audience") or [])
     ids = {f["id"] for f in spec["features"]}
     for g in spec["goods"]:
         assert g["id"] not in ids and g["duties"]

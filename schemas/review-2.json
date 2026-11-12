@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://policypack.dev/schemas/review-2.json",
   "title": "policypack review 보고서",
-  "description": "policypack review <저장소> 의 JSON. 키를 더할 때는 review_version 을 올리지 않는다. 받는 쪽은 모르는 키를 무시한다. 2: 확인할 것을 세 갈래로 나누고 부재 증명(searches)·summary·platforms 를 더했다. 2판 덧붙임(11/12): 답의 applies·condition·missing·shows·gate, 품목 묶음(group·summary.groups·profile.goods), not_answered goods-not-detected, 인용 why profile.",
+  "description": "policypack review <저장소> 의 JSON. 키를 더할 때는 review_version 을 올리지 않는다. 받는 쪽은 모르는 키를 무시한다. 2: 확인할 것을 세 갈래로 나누고 부재 증명(searches)·summary·platforms 를 더했다. 2판 덧붙임(11/12): 답의 applies·condition·missing·shows·gate, 품목 묶음(group·summary.groups·profile.goods), not_answered goods-not-detected, 인용 why profile. 2판 덧붙임(11/12 둘째): 답의 basis(해당 없음의 근거), gate 의 why audience·missing-check·applies-unknown 과 from seen-in-code·check-outside.",
   "type": "object",
   "properties": {
     "review_version": {
@@ -928,6 +928,13 @@
             null
           ]
         },
+        "basis": {
+          "enum": [
+            "처리 없음",
+            "확인 장치 없음",
+            null
+          ]
+        },
         "gate": {
           "anyOf": [
             {
@@ -936,14 +943,19 @@
                 "from": {
                   "enum": [
                     "not-applicable",
-                    "evidence-found"
+                    "evidence-found",
+                    "seen-in-code",
+                    "check-outside"
                   ]
                 },
                 "why": {
                   "enum": [
                     "condition-present",
                     "no-condition",
-                    "name-or-default"
+                    "name-or-default",
+                    "audience",
+                    "missing-check",
+                    "applies-unknown"
                   ]
                 },
                 "note": {
@@ -956,7 +968,7 @@
                 "why"
               ],
               "additionalProperties": false,
-              "description": "관문이 모델의 답을 바꾼 까닭. condition-present: 걸리는 조건(기능)이 있어 해당 없음을 받지 않음, no-condition: 걸리는 조건이 없다는 답이 없음, name-or-default: 충족 인용이 이름·기본값뿐"
+              "description": "관문이 모델의 답을 바꾼 까닭. condition-present: 걸리는 조건(기능)이 있어 해당 없음을 받지 않음, no-condition: 걸리는 조건이 없다는 답(applies 아니오·condition·basis 처리 없음)이 없음, name-or-default: 충족 인용이 이름·기본값뿐, audience: 이용자가 누구인지(아동·미성년자·청소년)에 걸리는 의무라 해당 없음을 받지 않음, missing-check: 답이 나이·본인·지역 확인 장치가 없다는 것을 근거로 듦, applies-unknown: 걸리는지 모른다고 답한 확인할 것을 해당 여부부터로 옮김"
             },
             {
               "type": "null"
@@ -1100,6 +1112,13 @@
                     null
                   ]
                 },
+                "basis": {
+                  "enum": [
+                    "처리 없음",
+                    "확인 장치 없음",
+                    null
+                  ]
+                },
                 "gate": {
                   "anyOf": [
                     {
@@ -1108,14 +1127,19 @@
                         "from": {
                           "enum": [
                             "not-applicable",
-                            "evidence-found"
+                            "evidence-found",
+                            "seen-in-code",
+                            "check-outside"
                           ]
                         },
                         "why": {
                           "enum": [
                             "condition-present",
                             "no-condition",
-                            "name-or-default"
+                            "name-or-default",
+                            "audience",
+                            "missing-check",
+                            "applies-unknown"
                           ]
                         },
                         "note": {
@@ -1128,7 +1152,7 @@
                         "why"
                       ],
                       "additionalProperties": false,
-                      "description": "관문이 모델의 답을 바꾼 까닭. condition-present: 걸리는 조건(기능)이 있어 해당 없음을 받지 않음, no-condition: 걸리는 조건이 없다는 답이 없음, name-or-default: 충족 인용이 이름·기본값뿐"
+                      "description": "관문이 모델의 답을 바꾼 까닭. condition-present: 걸리는 조건(기능)이 있어 해당 없음을 받지 않음, no-condition: 걸리는 조건이 없다는 답(applies 아니오·condition·basis 처리 없음)이 없음, name-or-default: 충족 인용이 이름·기본값뿐, audience: 이용자가 누구인지(아동·미성년자·청소년)에 걸리는 의무라 해당 없음을 받지 않음, missing-check: 답이 나이·본인·지역 확인 장치가 없다는 것을 근거로 듦, applies-unknown: 걸리는지 모른다고 답한 확인할 것을 해당 여부부터로 옮김"
                     },
                     {
                       "type": "null"
