@@ -217,8 +217,13 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
 
     items = doc["checklist"]
     firsts = [i["first"] for i in items if i["first"]]
-    live = {fid for fid, f in feats.items() if "removed" not in f}
-    whenever = rv._whenever()
+    firsts_of = [i for i in items if i["first"]]
+    rows = {d["id"]: d for d in rv.load_duties()}
+
+    def forced(i: dict) -> bool:
+        """그 기능이 있으면 걸리는 의무로 고정되는가(AI 고지는 프로필의 생성형 신호가 있을 때만)."""
+        return rv._always(rows[i["duty"]], feats.get(i["feature"]))
+
     # 받는 조건: 시험 파일·지어낸 인용은 코드에서 본 것·충족이 되지 못하고, 검색 줄 수가 다른 해당 없음은 '보임'으로
     # 남는다. 그 기능이 있으면 걸리는 의무(가입의 약관 고지, AI 고지)는 해당 없음이 되지 못한다
     for i in items:
@@ -236,7 +241,7 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
             assert f["status"] == (seen(i["duty"]) if ok else "check-outside")
             assert (f["gate"] or {}).get("why") == ("other-side" if ok and i["duty"] in screen else None)
         if f["answered"] == "not-applicable":
-            if whenever.get(i["duty"]) in live:
+            if forced(i):
                 assert f["status"] == seen(i["duty"]) and f["gate"]["note"].startswith(feats[i["feature"]]["name"])
                 assert f["gate"]["why"] == ("other-side" if i["duty"] in screen else "condition-present")
                 assert any(c["ok"] for c in f["citations"]) and f["reason"].startswith(feats[i["feature"]]["name"])
@@ -253,8 +258,9 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
 
     # AI 기능은 이해 단계가 더한 것뿐이라(Python 서버의 호출, 프로필 신호 없음) 생성형 신호가 아니다.
     # AI 사전 고지·결과물 표시는 묻지 않고 해당 여부다
+    # 그래도 생성형 AI 기능이 있으니 AI 고지는 묻는다. 그 기능이 있으면 걸리는 의무로 고정하지는 않는다
     held = {i["duty"] for i in items if i.get("not_answered") == "not-generative"}
-    assert held == set(rv._generative()) and not rv.generative(feats["genai"])
+    assert not held and not rv.generative(feats["genai"]) and set(rv._generative()) <= {i["duty"] for i in firsts_of}
     # 반박: 해당 여부는 묻지 않고, 뒤집기는 인용·검색 조건을 넘은 것만
     for i in items:
         if i["status"] == "check-applicability":
@@ -270,12 +276,12 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
             assert i["status"] == "evidence-found" and i["verification"]["shows"] == "행위"
         else:
             assert i["status"] == "not-applicable" and i["verification"]["off_quote"] and i["searches"][0]["ok"]
-            assert whenever.get(i["duty"]) not in live
+            assert not forced(i)
     # 반박이 해당 없음으로 뒤집으려 해도 같은 관문(그 기능이 있으면 걸리는 의무는 받지 않는다)
     for i in items:
         v = i["verification"]
         if v["result"] == "overturn-ungrounded" and v.get("status") == "not-applicable":
-            assert whenever.get(i["duty"]) in live and v["gate"]["why"] == "condition-present"
+            assert forced(i) and v["gate"]["why"] == "condition-present"
     assert not any(f"앞 판단: {P.SAID['check-applicability']}" in p for p in log)  # 해당 여부는 반박하지 않는다
 
     # 순서: 갈래 순, rank 는 1부터, summary 의 맨 위 다섯 건
@@ -474,12 +480,12 @@ def test_an_unknown_applicability_goes_to_check_applicability(tmp_path):
 
     doc, log = _run(_repo(tmp_path), "duty", use_static=False, investigator=fake_investigator(unsure_answer))
     _valid(doc)
-    live = {f["id"] for f in doc["profile"]["features"] if "removed" not in f}
-    whenever, screen = rv._whenever(), rv._sides()["screen"]  # 픽스처는 서버만이다
+    feats = {f["id"]: f for f in doc["profile"]["features"]}
+    rows, screen = {d["id"]: d for d in rv.load_duties()}, rv._sides()["screen"]  # 픽스처는 서버만이다
     for i in doc["checklist"]:
         if not i["asked"]:
             continue
-        if whenever.get(i["duty"]) in live:
+        if rv._always(rows[i["duty"]], feats.get(i["feature"])):
             assert i["first"]["status"] == ("check-outside" if i["duty"] in screen else "seen-in-code"), i["duty"]
         else:
             assert i["status"] == "check-applicability" and i["first"]["gate"]["why"] == "applies-unknown", i["duty"]
@@ -674,6 +680,16 @@ def test_ai_notices_wait_for_a_generative_signal(tmp_path):
     assert not rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": "path", "value": "ai"}]})
     for kind in ("package", "import", "call", "url"):
         assert rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": kind, "value": "openai"}]})
+    # 프로필 신호는 '그 기능이 있으면 걸리는 의무'로 고정할 때만 요구한다. 신호 없이 AI 기능만 있으면 묻고 조사 답을
+    # 따른다(11/13 4배치: Python 서버·자체 API·로컬 모델로 LLM 을 부르는 곳의 AI 고지가 묻지 않은 해당 여부로 갔다)
+    notice, gen = _duty("aiact-31-2"), {**pose, "sources": ["signal"], "evidence": [{"signal": "url", "value": "x"}]}
+    nothing = rv.said({"applies": "아니오", "condition": "생성 결과를 보여 주지 않는다", "basis": "처리 없음"})
+    assert rv.accept(notice, nothing, "not-applicable", [], True, pose) == ("not-applicable", None)
+    assert rv.accept(notice, nothing, "not-applicable", [], True, gen)[1]["why"] == "condition-present"
+    llm = [{"file": "server/answer.py", "line": 4, "text": "return client.chat.completions.create(", "ok": True,
+            "why": "grounded"}]  # fmt: skip
+    seen_llm = rv.said({"applies": "예", "condition": "Python 서버가 LLM 을 부른다"})
+    assert rv.accept(notice, seen_llm, "seen-in-code", llm, False, pose) == ("seen-in-code", None)
 
     gen = set(rv._generative())
     assert gen == {"aiact-31-1", "aiact-31-2"}
@@ -750,6 +766,13 @@ def test_a_one_sided_repository_checks_the_other_side_outside(tmp_path):
     assert rv.accept(password, yes, "evidence-found", ok, False, None, "server")[0] == "check-outside"  # 이름·기본값
     act = rv.said({"applies": "예", "shows": "행위"})
     assert rv.accept(password, act, "evidence-found", ok, False, None, "server") == ("evidence-found", None)
+    # 이 저장소의 줄을 인용해 빈틈 자체를 보였으면(shows 빈틈, 관문 통과) 옮기지 않는다(11/13 4배치: 관리자 화면 보호가
+    # 상수 "true" 로 고정된 화면만 저장소)
+    gap = rv.said({"applies": "예", "condition": "관리자 화면", "shows": "빈틈"})
+    guard = _duty("safety-std-5-1")
+    assert rv.accept(guard, gap, "seen-in-code", ok, False, None, "server") == ("seen-in-code", None)
+    assert rv.accept(guard, yes, "seen-in-code", ok, False, None, "server")[0] == "check-outside"
+    assert "빈틈" in P.SHOWS and "빈틈" in P.INVESTIGATE
 
 
 def test_a_config_line_with_an_address_is_a_citation(tmp_path):

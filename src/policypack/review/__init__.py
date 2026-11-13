@@ -33,8 +33,9 @@
    시험 파일의 줄과 설정 파일의 줄은 인용으로 받지 않는다. 설정 파일이라도 주소(scheme://…)나 호스트 값이 글자 그대로
    있는 줄은 받는다(why: config-value). 요건은 조문 인용에 있는 것만 묻는다.
    특정 품목(주류·도서 등, features.yaml 의 goods) 의무는 프로필에 그 품목 신호가 없으면 묻지 않고 '해당 여부부터
-   확인할 것'에 한 묶음(group: goods)으로 싣는다. AI 사전 고지·결과물 표시(features.yaml 의 generative)는 생성형 AI
-   신호(프로필의 SDK 꾸러미·import·호출·주소)가 없으면 묻지 않고 '해당 여부부터'로 싣는다(not-generative).
+   확인할 것'에 한 묶음(group: goods)으로 싣는다. AI 사전 고지·결과물 표시(features.yaml 의 generative)는 분류·인식
+   모델(ai-model)만 있으면 묻지 않고 '해당 여부부터'로 싣는다(not-generative). 생성형 AI 기능이 있으면 묻는다. 그 기능이
+   있으면 걸리는 의무로 고정하는 것은 프로필의 생성형 신호(SDK 꾸러미·import·호출·주소)가 있을 때만이다.
 5. 반박: 다른 모델이 빼는 답(충족·해당 없음·걸리지 않는 것으로 보임)에는 "지키지 않은 곳을 찾아라", 코드에서 본 것과
    저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다
    (judge_rebut: 자유 입력 관문이 옮긴 항목은 입력란·필드·저장의 인용 없이, 금지 의무는 금지 행위의 인용 없이 깨지
@@ -278,7 +279,11 @@ def _present(feature: dict | None) -> bool:
 
 
 def _always(d: dict, feature: dict | None) -> bool:
-    """그 기능이 있으면 걸리는 의무이고 기능이 있다."""
+    """그 기능이 있으면 걸리는 의무이고 기능이 있다. AI 사전 고지·결과물 표시(generative)는 생성형 신호(프로필)가
+    있을 때만이다. 신호 없이 AI 기능만 있으면 묻고 조사 답을 따른다(11/13 4배치: Python 서버·자체 API·로컬 모델로 LLM
+    을 부르는 곳은 프로필 신호가 없다)."""
+    if d["id"] in _generative() and not generative(feature):
+        return False
     return d["id"] in _whenever() and _present(feature)
 
 
@@ -309,9 +314,15 @@ def lacks(root: Path, platforms: list[str]) -> str | None:
 SIDE_KO = {"screen": "화면", "server": "서버"}
 
 
-def other_side(d: dict, status: str, gate_: dict | None, lacking: str | None) -> tuple[str, dict | None]:
-    """저장소에 없는 쪽이 하는 의무의 '코드에서 본 것'은 '저장소 밖에서 확인할 것'이다."""
+def other_side(
+    d: dict, status: str, gate_: dict | None, lacking: str | None, s: dict | None = None, cs: list | None = None
+) -> tuple[str, dict | None]:
+    """저장소에 없는 쪽이 하는 의무의 '코드에서 본 것'은 '저장소 밖에서 확인할 것'이다. 다만 답이 이 저장소의 줄을
+    인용해 빈틈 자체를 보였으면(shows '빈틈'·'금지 행위', 관문 통과 인용) 옮기지 않는다(11/13 4배치: 화면만인 저장소의
+    관리자 화면 보호가 상수 "true" 로 고정된 것을 '저장소 밖'으로 보냈다)."""
     if status != "seen-in-code" or not lacking or d["id"] not in _sides().get(lacking, set()):
+        return status, gate_
+    if s and s["shows"] in ("빈틈", "금지 행위") and grounded(cs or []):
         return status, gate_
     where = SIDE_KO[lacking]
     note = f"이 저장소에는 {where} 코드가 없어 {where}에서 하는 의무는 '저장소 밖에서 확인할 것'으로 옮겼습니다."
@@ -418,7 +429,7 @@ def accept(
     d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None, lacking: str | None = None
 ):
     """모델이 고른 상태에 받는 조건을 건다. `lacking` 은 저장소에 없는 쪽(lacks). (상태, 관문이 바꾼 까닭 또는 None)"""
-    return other_side(d, *_accept(d, s, answered, cs, proven, feature), lacking)
+    return other_side(d, *_accept(d, s, answered, cs, proven, feature), lacking, s, cs)
 
 
 def _accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None):
@@ -802,7 +813,7 @@ def judge_rebut(
     elif before in DROPS:
         rec["gate"] = unknown(d, s, "seen-in-code", feature)
         after, ok = ("check-applicability" if rec["gate"] else "seen-in-code"), grounded(cs)
-        after, rec["gate"] = other_side(d, after, rec["gate"], lacking)
+        after, rec["gate"] = other_side(d, after, rec["gate"], lacking, s, cs)
     elif claimed == "evidence-found" and same_model:
         rec["gate"] = {"from": claimed, "why": "same-model", "note": SAME_MODEL_NOTE}
         after, ok = claimed, False
@@ -980,8 +991,8 @@ def _blank(fid: str, name: str) -> dict:
 def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[dict], ...]:
     """(기능 목록, 목록 층 의무, 검토 층 의무, 묻지 않는 의무). 기능은 신호 + 이해 단계가 더한 것 − 뺀 것 + 정적
     검사가 찾은 것. 검토 층은 묻는 순서다(PRIORITY·기능 목록 순, 기능 안에서는 core_key). 품목 의무는 프로필에 그
-    품목 신호가 있을 때만, AI 사전 고지·결과물 표시는 생성형 AI 신호가 있을 때만 묻는다. 묻지 않는 의무는 품목 의무와,
-    AI 기능(genai·ai-model)은 있는데 생성형 신호가 없을 때의 그 두 의무다."""
+    품목 신호가 있을 때만 묻는다. 묻지 않는 의무는 품목 의무와, 생성형 AI 기능 없이 분류·인식 모델(ai-model)만 있을 때의
+    AI 사전 고지·결과물 표시다."""
     spec = load_features()
     names = {f["id"]: f["name"] for f in spec["features"]}
     duties = load_duties()
@@ -1024,13 +1035,12 @@ def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[d
     goods, seen = _goods(), {g["id"] for g in prof.get("goods") or []}
     skipped = [d for d in review if d["id"] in goods and goods[d["id"]]["id"] not in seen]
     review = [d for d in review if d not in skipped]
-    if not generative(features.get("genai")):
-        gen = _generative()
-        review = [d for d in review if d["id"] not in gen]
-        if {"genai", "ai-model"} & {f["id"] for f in live}:
-            held = [by_id[d] for d in gen]
-            listed += [d for d in held if d not in listed]
-            skipped += held
+    if not _present(features.get("genai")) and "ai-model" in {f["id"] for f in live}:
+        # 분류·인식 모델만 있으면 AI 사전 고지·결과물 표시는 묻지 않고 해당 여부다. 생성형 AI 기능이 있으면(신호가
+        # 프로필에 없어도) 묻고 조사 답을 따른다(_always)
+        held = [by_id[d] for d in _generative()]
+        listed += [d for d in held if d not in listed]
+        skipped += held
     review.sort(key=lambda d: (order.get(d["feature"], rest.get(d["feature"], 99)), *core_key(d)))
     return list(features.values()), listed, review, skipped
 
