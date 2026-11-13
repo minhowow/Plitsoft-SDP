@@ -211,11 +211,14 @@ class Limits:
 def check(root: Path, citations: list[dict]) -> list[dict]:
     """인용 관문(agent_pass.gate)에 더해, 시험·픽스처·설정 파일의 줄은 받지 않는다(why: test-file). 설정 파일이라도
     주소나 호스트 값이 글자 그대로 있는 줄은 받는다(why: config-value. 11/13 실측: Sentry DSN 줄을 받지 않았다)."""
-    out = gate(root, citations)
+    out, root = gate(root, citations), root.resolve()
     for c in out:
         if c["ok"]:
-            rel = c["file"].removeprefix("./").lstrip("/")
-            role = classify(rel, (root / rel).read_text(encoding="utf-8", errors="replace"))
+            # 관문은 '..' 이 든 경로를 풀어 파일을 찾는다. 같은 파일을 저장소 기준 경로로 읽는다(11/13 실측:
+            # 'src/styles/../components/…' 인용에서 없는 폴더를 거쳐 읽다가 검사가 멈췄다)
+            path = (root / c["file"].lstrip("/")).resolve()
+            rel = path.relative_to(root).as_posix()
+            role = classify(rel, path.read_text(encoding="utf-8", errors="replace"))
             if role in SERVICE:
                 c["file"] = rel
             elif role is Role.CONFIG and _VALUE.search(c["text"]):

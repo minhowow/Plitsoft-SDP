@@ -750,7 +750,9 @@ def test_a_config_line_with_an_address_is_a_citation(tmp_path):
         {"file": "vite.config.ts", "line": 1, "text": 'host: "api.example.co.kr"'},
         TEST_LINE,
     ]
+    cites.append({"file": "src/styles/../routes/signup.ts", "line": 4, "text": SIGNUP["text"]})  # 없는 폴더를 거친다
     out = rv.check(tmp_path, cites)
+    assert out[-1]["ok"] and out.pop()["file"] == "src/routes/signup.ts"
     assert [(c["ok"], c["why"]) for c in out] == [
         (True, "config-value"),
         (False, "test-file"),
