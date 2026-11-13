@@ -20,6 +20,7 @@
   no-source 그 법령 id 의 원문 파일이 없다
 
 검토 층 후보 = 대조 pass · confidence high · scope general 또는 domain · 기능이 있다('지위'가 아니다).
+prohibition 은 금지 의무("~하지 말 것", features.yaml 의 prohibitions)다.
 검토 층 후보와 내장 팩(kr-core)이 다루는 의무에는 질문에 넣을 글(걸리는 신호·위반 모양·지킨 모양·주체)을 함께 싣는다.
 freq 는 의무 지도의 흔함 측정(9/30 코퍼스 dev 저장소 20개 가운데 그 의무의 신호 정규식이 걸린 저장소 수)이다. review 가
 기능 안에서 묻는 순서(일반 범위 → 흔한 것 → 확신 높은 것)에 쓴다.
@@ -128,6 +129,8 @@ def main(argv: list[str]) -> int:
     known = {d["id"] for d in duties}
     stray = sorted(set(by_id) - known)
     assert not stray, f"의무 지도에 없는 id: {stray}"
+    prohibitions = set(spec.get("prohibitions") or [])
+    assert prohibitions <= known, f"의무 지도에 없는 금지 의무 id: {sorted(prohibitions - known)}"
 
     from policypack.pack.loader import load_pack
 
@@ -166,6 +169,7 @@ def main(argv: list[str]) -> int:
                 "quote_how": how,
                 "review_candidate": candidate,
                 "krcore": d["id"] in krcore,
+                "prohibition": d["id"] in prohibitions,
                 **(
                     {
                         "addressee": d["addressee"],

@@ -207,6 +207,7 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
     assert "web-ui" not in feats
     assert doc["run"]["lacks"] == "screen"  # 서버만이라 화면이 하는 의무의 '코드에서 본 것'은 저장소 밖이다
     screen = rv._sides()["screen"]
+    banned = {d["id"] for d in rv.load_duties() if d["prohibition"]}
 
     def seen(duty: str) -> str:
         return "check-outside" if duty in screen else "seen-in-code"
@@ -228,7 +229,10 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
         proven = bool(f["searches"]) and all(s["ok"] for s in f["searches"])
         if f["answered"] == "evidence-found":
             assert f["status"] == ("evidence-found" if ok else "check-outside")
-        if f["answered"] == "seen-in-code":
+        if f["answered"] == "seen-in-code" and i["duty"] in banned:  # 금지 행위의 인용이 없다
+            assert f["status"] == ("not-applicable" if proven else "likely-not-applicable")
+            assert f["gate"]["why"] == "prohibition"
+        elif f["answered"] == "seen-in-code":
             assert f["status"] == (seen(i["duty"]) if ok else "check-outside")
             assert (f["gate"] or {}).get("why") == ("other-side" if ok and i["duty"] in screen else None)
         if f["answered"] == "not-applicable":
@@ -753,3 +757,96 @@ def test_a_config_line_with_an_address_is_a_citation(tmp_path):
         (True, "config-value"),
         (False, "test-file"),
     ]
+
+
+def _flip(status: str, cites: list, **said) -> dict:
+    return {"duty": "x", "result": "뒤집음", "status": status, "citations": cites, "searches": [], **said}
+
+
+def test_a_relabelled_guess_cannot_raise_an_item_the_guess_gate_moved(tmp_path):
+    """자유 입력 관문이 '걸리지 않는 것으로 보임'으로 옮긴 항목은 반박이 표시만 바꿔 다시 올리지 못한다(11/13 실측:
+    유튜브 검색 재생을 '자유 입력 추측'으로 옮긴 것을 반박이 '입력란·처리·저장'으로 바꿔 달고 '모름'으로 다시 올렸다).
+    올리려면 그 정보를 받는 입력란·필드·저장 코드의 인용이 관문을 통과하고 applies 가 '예'여야 한다."""
+    root = _repo(tmp_path)
+    d = _duty("pipa-23-1")
+    guessed = rv.said({"applies": "모름", "condition": "채팅에 쓸 수 있다", "trigger": "자유 입력 추측"})
+    status, gate = rv.accept(d, guessed, "check-applicability", [], False, None)
+    f = {"status": status, "gate": gate}
+    assert status == "likely-not-applicable" and gate["why"] == "free-input"
+    relabel = _flip("확인할 것(해당 여부)", [STORE], applies="모름", trigger="입력란·처리·저장")
+    out = rv.judge_rebut(root, d, relabel, f, None, None, False)
+    assert out["result"] == "overturn-ungrounded" and out["gate"]["why"] == "free-input"
+    fake = _flip("확인할 것(코드에서 본 것)", [FAKE], applies="예", trigger="입력란·처리·저장")
+    assert rv.judge_rebut(root, d, fake, f, None, None, False)["result"] == "overturn-ungrounded"
+    field = _flip("확인할 것(코드에서 본 것)", [STORE], applies="예", trigger="입력란·처리·저장")
+    out = rv.judge_rebut(root, d, field, f, None, None, False)
+    assert out["result"] == "overturned" and out["status"] == "seen-in-code"
+    # 관문이 옮기지 않은 빼는 답은 지금처럼 뒤집을 수 있다
+    plain = {"status": "likely-not-applicable", "gate": None}
+    assert rv.judge_rebut(root, d, relabel, plain, None, None, False)["status"] == "check-applicability"
+
+    # 반박 질문에 그 조건을 적는다
+    def guessing(_duty_id):
+        return ("확인할 것(해당 여부)", [], [], {"applies": "모름", "trigger": "자유 입력 추측"})
+
+    _, log = _run(root, "duty", use_static=False, investigator=fake_investigator(guessing))
+    assert any("자유 입력 추측뿐이었다" in p for p in log)
+
+
+def test_a_prohibition_is_seen_in_code_only_with_the_prohibited_act(tmp_path):
+    """금지 의무("~하지 말 것")는 금지된 행위 자체를 인용할 때만 '코드에서 본 것'이다. 막는 장치가 없다는 것은 근거가
+    아니고, 금지된 행위를 찾지 못하면 '걸리지 않는 것으로 보임'(검색이 맞으면 '해당 없음')이다(11/13 실측: 가짜 마감
+    타이머·'반품 불가' 문구를 찾지 못하고도 "막는 장치가 없다"며 '코드에서 본 것'으로 뒀다)."""
+    rows = {d["id"]: d for d in rv.load_duties()}
+    banned = {i for i, d in rows.items() if d["prohibition"]}
+    assert {"fla-3-1-h2", "ecom-21-1-h1-withdraw", "ecom-18-9"} <= banned
+    assert not banned & set(rv._whenever()) and all(rows[i]["review_candidate"] or rows[i]["krcore"] for i in banned)
+    assert "금지 의무" in P.duty_block(rows["fla-3-1-h2"]) and "금지 의무" not in P.duty_block(rows["tcra-3-2"])
+    ok = [{"file": "a.ts", "line": 1, "text": "x", "ok": True, "why": "grounded"}]
+    d = rows["fla-3-1-h2"]
+    no_guard = rv.said({"applies": "예", "condition": "상품을 판다", "missing": "기만 표시를 막는 장치가 없음"})
+    status, gate = rv.accept(d, no_guard, "seen-in-code", ok, True, None)
+    assert status == "not-applicable" and gate["why"] == "prohibition" and "근거가" in gate["note"]
+    assert rv.accept(d, no_guard, "seen-in-code", ok, False, None)[0] == "likely-not-applicable"
+    act = rv.said({"applies": "예", "condition": "가짜 마감 타이머를 보인다", "shows": "금지 행위"})
+    assert rv.accept(d, act, "seen-in-code", ok, False, None) == ("seen-in-code", None)
+    assert rv.accept(d, rv.said({"applies": "모름"}), "seen-in-code", ok, False, None)[0] == "check-applicability"
+    assert rv.accept(rows["tcra-3-2"], no_guard, "seen-in-code", ok, False, None) == ("seen-in-code", None)
+
+    # 반박도 금지된 행위 자체를 인용해야 빼는 답을 깬다
+    root, f = _repo(tmp_path), {"status": "not-applicable", "gate": None}
+    out = rv.judge_rebut(root, d, _flip("확인할 것(코드에서 본 것)", [STORE], applies="예"), f, None, None, False)
+    assert out["result"] == "overturn-ungrounded" and out["gate"]["why"] == "prohibition"
+    shown = _flip("확인할 것(코드에서 본 것)", [STORE], applies="예", shows="금지 행위")
+    assert rv.judge_rebut(root, d, shown, f, None, None, False)["result"] == "overturned"
+    assert all("금지 행위" in t for t in (P.ACT, P.INVESTIGATE, P.REBUT))
+
+
+def test_the_same_model_cannot_raise_an_item_to_evidence_found(tmp_path):
+    """조사와 반박이 같은 모델이면 반박이 '충족'으로 올리는 뒤집기는 받지 않는다(11/13 실측: haiku 반박이 약관의 면책
+    한 줄 "AI 결과에는 오류가 있을 수 있습니다"로 AI 사전 고지를 충족으로 올렸다). 면책 한 줄은 행위가 아니라는 예를
+    준다."""
+    root, d = _repo(tmp_path), _duty("aiact-31-1")
+    f = {"status": "seen-in-code", "gate": None}
+    up = _flip("충족 근거 있음", [STORE], applies="예", shows="행위")
+    out = rv.judge_rebut(root, d, up, f, None, None, True)
+    assert out["result"] == "overturn-ungrounded" and out["gate"]["why"] == "same-model"
+    assert rv.judge_rebut(root, d, up, f, None, None, False)["result"] == "overturned"
+    assert "오류가 있을 수 있습니다" in P.ACT
+
+    # 전체 경로: 같은 모델의 반박은 충족으로 올리지 못하고, 다른 뒤집기(해당 없음 등)는 그대로다
+    log: list = []
+    doc, _ = _run(root, "duty", use_static=False, checker=fake_checker(log))
+    same = rv.review(
+        root,
+        AgentJudge("claude-haiku-5-5", fake_investigator()),
+        AgentJudge("claude-haiku-5-5", fake_checker([])),
+        rv.Limits(usd=5.0, seconds=300, concurrency=2, batch="duty"),
+        use_static=False,
+    )
+    _valid(same)
+    flips = [i for i in doc["checklist"] if i["verification"]["result"] == "overturned"]
+    raised = [i for i in flips if i["status"] == "evidence-found"]
+    held = [i for i in same["checklist"] if (i["verification"].get("gate") or {}).get("why") == "same-model"]
+    assert raised and {i["duty"] for i in held} == {i["duty"] for i in raised}
+    assert all(i["status"] != "evidence-found" for i in held)

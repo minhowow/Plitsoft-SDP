@@ -28,13 +28,17 @@
                            받지 않는다
      반대쪽 의무           저장소가 서버만 또는 화면만이면 반대쪽이 하는 의무(features.yaml 의 sides)의 '코드에서
                            본 것'은 '저장소 밖에서 확인할 것'
+     금지 의무             표의 prohibition("~하지 말 것")은 금지된 행위 자체의 인용(shows '금지 행위')이 있어야
+                           '코드에서 본 것'이다. 아니면 '걸리지 않는 것으로 보임'(검색이 맞으면 '해당 없음')
    시험 파일의 줄과 설정 파일의 줄은 인용으로 받지 않는다. 설정 파일이라도 주소(scheme://…)나 호스트 값이 글자 그대로
    있는 줄은 받는다(why: config-value). 요건은 조문 인용에 있는 것만 묻는다.
    특정 품목(주류·도서 등, features.yaml 의 goods) 의무는 프로필에 그 품목 신호가 없으면 묻지 않고 '해당 여부부터
    확인할 것'에 한 묶음(group: goods)으로 싣는다. AI 사전 고지·결과물 표시(features.yaml 의 generative)는 생성형 AI
    신호가 없으면(분류·인식 모델만, 또는 경로 낱말·이해 단계의 말뿐) 묻지 않고 '해당 여부부터'로 싣는다(not-generative).
 5. 반박: 다른 모델이 빼는 답(충족·해당 없음·걸리지 않는 것으로 보임)에는 "지키지 않은 곳을 찾아라", 코드에서 본 것과
-   저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다. 앞
+   저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다
+   (judge_rebut: 자유 입력 관문이 옮긴 항목은 입력란·필드·저장의 인용 없이, 금지 의무는 금지 행위의 인용 없이 깨지
+   못하고, 조사와 반박이 같은 모델이면 '충족'으로 올리지 못한다). 앞
    판단이 조문에 없는 요건을 들었는지도 적는다(off_quote). 해당 여부는 사업자의 판단이라 반박하지 않는다.
 6. 체크리스트는 상태의 갈래 순(코드에서 본 것이 맨 위), 그 안에서는 거의 모든 서비스·가입·AI·외부 전송 순이다.
    기능 안에서는 핵심 의무(일반 범위 → 흔한 것 → 확신 높은 것)가 먼저이고 품목 의무가 맨 뒤다. 묻는 순서도 같아서
@@ -400,6 +404,21 @@ def _missing(note: str, s: dict) -> str:
     return note + (f": {s['missing']}." if s["missing"] else ".")
 
 
+PROHIBITION_NOTE = (
+    "금지 의무라 금지된 행위 자체를 인용하지 않으면 '코드에서 본 것'으로 받지 않았습니다(막는 장치가 없다는 것은 근거가"
+    " 아닙니다)."
+)
+GUESSED_HINT = (
+    "\n  앞 판단의 조건은 자유 입력 추측뿐이었다. 뒤집으려면 그 정보를 받는 입력란·필드·저장 코드를 인용하고"
+    " applies '예', trigger '입력란·처리·저장'으로 답한다."
+)
+SAME_MODEL_NOTE = "조사와 반박이 같은 모델이라 '충족 근거 있음'으로 올리는 뒤집기는 받지 않았습니다."
+GUESSED_NOTE = (
+    "조사 답의 조건이 자유 입력 추측뿐이라 '걸리지 않는 것으로 보임'으로 둔 의무입니다. 그 정보를 받는 입력란·필드·저장"
+    " 코드의 인용(applies '예', trigger '입력란·처리·저장')이 관문을 통과하지 않아 뒤집기를 받지 않았습니다."
+)
+
+
 def guess(d: dict, s: dict, answered: str, feature: dict | None) -> dict | None:
     """걸리는 조건이 이용자가 자유 입력·사진에 넣을 수 있다는 추측뿐이다(trigger '자유 입력 추측'). 11/13 실측: 채팅
     입력에 민감정보가, 인증 사진에 신분증이 들어올 수 있다며 '해당 없음'을 '해당 여부부터'로 뒤집었다. 그 기능이 있으면
@@ -429,6 +448,10 @@ def _accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, featu
         return "seen-in-code", {"from": answered, "why": "condition-present", "note": _missing(note, s)}
     if answered in TO_CHECK and (gate_ := unknown(d, s, answered, feature)):
         return "check-applicability", gate_
+    if answered == "seen-in-code" and d.get("prohibition") and s["shows"] != "금지 행위":
+        # 11/13 실측: 가짜 마감 타이머·'반품 불가' 문구를 찾지 못하고도 "막는 장치가 없다"며 코드에서 본 것으로 뒀다
+        status = "not-applicable" if proven else "likely-not-applicable"
+        return status, {"from": answered, "why": "prohibition", "note": PROHIBITION_NOTE}
     if answered in ("evidence-found", "seen-in-code") and not grounded(cs):
         return "check-outside", None
     if answered == "evidence-found" and s["shows"] != "행위":
@@ -723,30 +746,84 @@ def investigate(
     for r in (doc or {}).get("results") or []:
         if not isinstance(r, dict) or r.get("duty") not in by_id or r.get("status") not in P.ANSWER:
             continue
-        answered = P.ANSWER[r["status"]]
-        cs = check(run.root, P.citations_of(r))
-        searches, proven = prove(run.root, P.searches_of(r))
-        s = said(r)
-        status, gate_ = accept(by_id[r["duty"]], s, answered, cs, proven, feature, run.lacks)
-        if (status == "seen-in-code" or (gate_ or {}).get("why") == "other-side") and not grounded(cs):
-            cs = cs + _feature_citations(run.root, feature)  # 조건(기능)이 있다는 근거는 프로필 신호다
-        reason = str(r.get("reason") or "")[:800]
-        results[r["duty"]] = {
-            "asked": True,
-            "status": status,
-            "answered": answered,
-            "citations": cs,
-            "searches": searches,
-            **s,
-            "gate": gate_,
-            "question": str(r.get("question") or "")[:400],
-            "reason": f"{gate_['note']} {reason}".strip() if gate_ else reason,
-            "q": qn,
-        }
+        results[r["duty"]] = {"asked": True, **judge_first(run.root, by_id[r["duty"]], r, feature, run.lacks), "q": qn}
     for d in group:
         if d["id"] not in results:
             results[d["id"]] = {"asked": True, "why": failure or "no-answer", "q": qn}
     return results
+
+
+def judge_first(root: Path, d: dict, r: dict, feature: dict | None, lacking: str | None) -> dict:
+    """조사 답 하나(모델 JSON 의 results 한 칸)를 관문에 건다. 실행과, 저장된 답에 규칙만 다시 거는 일이 함께 쓴다."""
+    answered = P.ANSWER[r["status"]]
+    cs = check(root, P.citations_of(r))
+    searches, proven = prove(root, P.searches_of(r))
+    s = said(r)
+    status, gate_ = accept(d, s, answered, cs, proven, feature, lacking)
+    if (status == "seen-in-code" or (gate_ or {}).get("why") == "other-side") and not grounded(cs):
+        cs = cs + _feature_citations(root, feature)  # 조건(기능)이 있다는 근거는 프로필 신호다
+    reason = str(r.get("reason") or "")[:800]
+    return {
+        "status": status,
+        "answered": answered,
+        "citations": cs,
+        "searches": searches,
+        **s,
+        "gate": gate_,
+        "question": str(r.get("question") or "")[:400],
+        "reason": f"{gate_['note']} {reason}".strip() if gate_ else reason,
+    }
+
+
+def judge_rebut(
+    root: Path, d: dict, r: dict, f: dict, feature: dict | None, lacking: str | None, same_model: bool
+) -> dict:
+    """반박 답 하나를 관문에 건다. `f` 는 그 의무의 조사 답(judge_first 의 결과)이다.
+    빼는 답을 깨면 '코드에서 본 것'(인용 필요). 확인할 것을 깨면 충족(행위 자체를 보이는 인용) 또는 해당 없음(걸리는
+    조건이 없다는 답과 검색 증명)이다. 해당 없음은 조사 답과 같은 관문(absent)을 넘어야 받는다. 더해서
+    - 자유 입력 추측으로 깨거나, 자유 입력 관문이 옮긴 항목을 그 정보를 받는 입력란·필드·저장의 인용(applies '예') 없이
+      깨면 받지 않는다(free-input)
+    - 금지 의무는 금지된 행위 자체의 인용(shows '금지 행위') 없이 깨지 못한다(prohibition)
+    - 조사와 반박이 같은 모델이면 '충족'으로 올리지 못한다(same-model. 11/13 실측: 약관의 면책 한 줄로 AI 사전 고지를
+      충족으로 올렸다)"""
+    cs = check(root, P.citations_of(r))
+    searches, proven = prove(root, P.searches_of(r))
+    s = said(r)
+    rec = {
+        "citations": cs,
+        "searches": searches,
+        **s,
+        "gate": None,
+        "off_quote": r.get("off_quote") is True,
+        "reason": str(r.get("reason") or "")[:800],
+    }
+    before = f["status"]
+    claimed = P.ANSWER.get(r.get("status") or "", "")
+    if r["result"] == "유지" or (before in TO_CHECK and claimed not in ("evidence-found", "not-applicable")):
+        return {"result": "upheld", **rec}
+    to = claimed or "seen-in-code"
+    guessed = (f.get("gate") or {}).get("why") == "free-input"
+    proper = s["applies"] == "예" and s["trigger"] == "입력란·처리·저장" and grounded(cs)
+    if before in DROPS and (free := guess(d, s, to, feature)):  # 자유 입력 추측으로는 빼는 답을 깨지 못한다
+        free["note"] += " 뒤집기를 받지 않았습니다."
+        rec["gate"], after, ok = free, to, False
+    elif before in DROPS and guessed and not proper:  # 11/13 실측: 표시만 '입력란'으로 바꿔 다시 올렸다
+        rec["gate"], after, ok = {"from": to, "why": "free-input", "note": GUESSED_NOTE}, to, False
+    elif before in DROPS and d.get("prohibition") and s["shows"] != "금지 행위":
+        rec["gate"], after, ok = {"from": to, "why": "prohibition", "note": PROHIBITION_NOTE}, to, False
+    elif before in DROPS:
+        rec["gate"] = unknown(d, s, "seen-in-code", feature)
+        after, ok = ("check-applicability" if rec["gate"] else "seen-in-code"), grounded(cs)
+        after, rec["gate"] = other_side(d, after, rec["gate"], lacking)
+    elif claimed == "evidence-found" and same_model:
+        rec["gate"] = {"from": claimed, "why": "same-model", "note": SAME_MODEL_NOTE}
+        after, ok = claimed, False
+    elif claimed == "evidence-found":
+        after, ok = claimed, grounded(cs) and s["shows"] == "행위"
+    else:
+        got, rec["gate"] = absent(d, s, proven, feature, grounded(cs))
+        after, ok = claimed, got == "not-applicable"
+    return {"result": "overturned" if ok else "overturn-ungrounded", "status": after, **rec}
 
 
 def rebut(
@@ -767,6 +844,7 @@ def rebut(
             + (f"\n  앞 판단이 적은 없는 것: {f['missing']}" if f.get("missing") else "")
             + (f"\n  앞 인용: {P.cite_lines(ok)}" if ok else "")
             + (f"\n  앞 검색: {P.search_lines(f['searches'])}" if f["searches"] else "")
+            + (GUESSED_HINT if (f.get("gate") or {}).get("why") == "free-input" else "")
         )
     prompt = P.REBUT.format(
         summary=summary or "(요약 없음)",
@@ -786,42 +864,12 @@ def rebut(
         return {d["id"]: {"result": "not-run", "why": failure, "q": qn} for d in items}
     out: dict[str, dict] = {}
     by_id = {d["id"]: d for d in items}
+    same = run.investigator.model == run.checker.model
     for r in (doc or {}).get("results") or []:
         if not isinstance(r, dict) or r.get("duty") not in by_id or r.get("result") not in ("유지", "뒤집음"):
             continue
-        cs = check(run.root, P.citations_of(r))
-        searches, proven = prove(run.root, P.searches_of(r))
-        s = said(r)
-        rec = {
-            "citations": cs,
-            "searches": searches,
-            **s,
-            "gate": None,
-            "off_quote": r.get("off_quote") is True,
-            "reason": str(r.get("reason") or "")[:800],
-            "q": qn,
-        }
-        before = first[r["duty"]]["status"]
-        claimed = P.ANSWER.get(r.get("status") or "", "")
-        if r["result"] == "유지" or (before in TO_CHECK and claimed not in ("evidence-found", "not-applicable")):
-            out[r["duty"]] = {"result": "upheld", **rec}
-            continue
-        # 빼는 답을 깨면 '코드에서 본 것'(인용 필요). 확인할 것을 깨면 충족(행위 자체를 보이는 인용) 또는 해당
-        # 없음(걸리는 조건이 없다는 답과 검색 증명)이다. 해당 없음은 조사 답과 같은 관문(absent)을 넘어야 받는다
-        free = guess(by_id[r["duty"]], s, claimed or "seen-in-code", feature) if before in DROPS else None
-        if free:  # 자유 입력 추측으로는 빼는 답을 깨지 못한다
-            free["note"] += " 뒤집기를 받지 않았습니다."
-            rec["gate"], after, ok = free, claimed or "seen-in-code", False
-        elif before in DROPS:
-            rec["gate"] = unknown(by_id[r["duty"]], s, "seen-in-code", feature)
-            after, ok = ("check-applicability" if rec["gate"] else "seen-in-code"), grounded(cs)
-            after, rec["gate"] = other_side(by_id[r["duty"]], after, rec["gate"], run.lacks)
-        elif claimed == "evidence-found":
-            after, ok = claimed, grounded(cs) and s["shows"] == "행위"
-        else:
-            got, rec["gate"] = absent(by_id[r["duty"]], s, proven, feature, grounded(cs))
-            after, ok = claimed, got == "not-applicable"
-        out[r["duty"]] = {"result": "overturned" if ok else "overturn-ungrounded", "status": after, **rec}
+        d = by_id[r["duty"]]
+        out[r["duty"]] = {**judge_rebut(run.root, d, r, first[r["duty"]], feature, run.lacks, same), "q": qn}
     for d in items:
         out.setdefault(d["id"], {"result": "not-run", "why": failure or "no-answer", "q": qn})
     return out
