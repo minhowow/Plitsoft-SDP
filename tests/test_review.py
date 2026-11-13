@@ -251,10 +251,15 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
     # 이 픽스처에서 '걸리지 않는 것으로 보임'이 될 의무는 아동 동의(audience)뿐이라 해당 여부부터다(반박 시험에서 본다)
     assert {f["status"] for f in firsts} >= {"check-outside", "check-applicability", "not-applicable", "seen-in-code"}
 
+    # AI 기능은 이해 단계가 더한 것뿐이라(Python 서버의 호출, 프로필 신호 없음) 생성형 신호가 아니다.
+    # AI 사전 고지·결과물 표시는 묻지 않고 해당 여부다
+    held = {i["duty"] for i in items if i.get("not_answered") == "not-generative"}
+    assert held == set(rv._generative()) and not rv.generative(feats["genai"])
     # 반박: 해당 여부는 묻지 않고, 뒤집기는 인용·검색 조건을 넘은 것만
     for i in items:
         if i["status"] == "check-applicability":
-            assert i["verification"] == {"result": "not-run", "why": "business-judgment"}
+            why = "not-generative" if i["duty"] in held else "business-judgment"
+            assert i["verification"] == {"result": "not-run", "why": why}
     flipped = [i for i in items if i["verification"]["result"] == "overturned"]
     assert flipped
     for i in flipped:
@@ -612,10 +617,14 @@ def test_a_guess_about_free_input_is_not_a_condition(tmp_path):
     '걸리지 않는 것으로 보임', 반박의 뒤집기면 받지 않는다. 그 기능이 있으면 걸리는 의무와 이용자 의무는 그대로다."""
     ok = [{"file": "a.ts", "line": 1, "text": "x", "ok": True, "why": "grounded"}]
     signup = {"id": "signup", "name": "회원 가입·개인정보 수집", "evidence": [], "model_citations": []}
-    guess = rv.said({"applies": "모름", "condition": "채팅에 건강 정보를 쓸 수 있다", "trigger": "자유 입력 추측"})
-    for answered in ("seen-in-code", "check-outside", "check-applicability"):
-        status, gate = rv.accept(_duty("pipa-23-1"), guess, answered, ok, False, None)
-        assert status == "likely-not-applicable" and gate["why"] == "free-input" and gate["from"] == answered
+    guess = rv.said({"applies": "예", "condition": "채팅에 건강 정보를 쓸 수 있다", "trigger": "자유 입력 추측"})
+    status, gate = rv.accept(_duty("pipa-23-1"), guess, "seen-in-code", ok, False, None)
+    assert status == "likely-not-applicable" and gate["why"] == "free-input" and gate["from"] == "seen-in-code"
+    # '코드에서 본 것' 후보를 내릴 때만 쓴다. 해당 여부(사업자인지 모름 등)·저장소 밖은 그대로다(11/13 3배치 실측)
+    unsure = rv.said({"applies": "모름", "condition": "지능정보사업자인지 모른다", "trigger": "자유 입력 추측"})
+    assert rv.accept(_duty("pipa-23-1"), guess, "check-applicability", ok, False, None) == ("check-applicability", None)
+    assert rv.accept(_duty("pipa-23-1"), guess, "check-outside", ok, False, None) == ("check-outside", None)
+    assert rv.accept(_duty("dincl-19-2"), unsure, "seen-in-code", ok, False, None)[0] == "check-applicability"
     assert rv.accept(_duty("tcra-3-2"), guess, "seen-in-code", ok, False, signup)[0] == "seen-in-code"
     assert rv.accept(_duty("pipa-22-2-1"), guess, "check-applicability", ok, False, signup)[0] == "check-applicability"
     field = rv.said({"applies": "예", "condition": "건강 상태 선택지가 있다", "trigger": "입력란·처리·저장"})
@@ -658,11 +667,13 @@ def test_ai_notices_wait_for_a_generative_signal(tmp_path):
     pose = {"id": "genai", "name": "생성형 AI", "sources": ["model"], "evidence": [],
             "model_citations": [{**cite, "text": predict}]}  # fmt: skip
     assert not rv.generative(pose) and not rv.generative(None)
-    assert rv.generative({**pose, "model_citations": [{**cite, "text": "return client.chat.completions.create("}]})
-    assert rv.generative({**pose, "model_citations": [{**cite, "text": "from openai import OpenAI"}]})
+    # 프로필 신호(SDK 꾸러미·import·호출·주소)로만 정한다. 이해 단계의 인용, 정적 검사만으로는 아니다(11/13 3배치 실측:
+    # 정적 검사가 피드 화면의 JSX 한 줄을 AI 호출로 잡았다)
+    assert not rv.generative({**pose, "model_citations": [{**cite, "text": "return client.chat.completions.create("}]})
+    assert not rv.generative({**pose, "sources": ["static"]})
     assert not rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": "path", "value": "ai"}]})
-    assert rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": "package", "value": "openai"}]})
-    assert rv.generative({**pose, "sources": ["static"]})
+    for kind in ("package", "import", "call", "url"):
+        assert rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": kind, "value": "openai"}]})
 
     gen = set(rv._generative())
     assert gen == {"aiact-31-1", "aiact-31-2"}
@@ -691,24 +702,29 @@ def test_ai_notices_wait_for_a_generative_signal(tmp_path):
 
 
 def test_a_whenever_duty_answered_as_applicability_goes_up_when_the_feature_is_confirmed():
-    """그 기능이 있으면 걸리는 의무를 '해당 여부'로 답해도, 기능이 인용과 함께 확인돼 있으면 '코드에서 본 것'이다(11/13
-    실측: 위치 기능이 있는데 확인자료 기록 의무를 '해당 여부'로 답해 그대로 남았다)."""
+    """그 기능이 있으면 걸리는 의무를 '해당 여부'로 답해도, 조사 답이 그 기능의 처리가 저장소에 있다고 보고 인용했으면
+    '코드에서 본 것'이다(11/13 실측: 위치 기능이 있는데 확인자료 기록 의무를 '해당 여부'로 답해 그대로 남았다)."""
     line = {"file": "src/geo.ts", "line": 3, "signal": "call", "value": "navigator.geolocation", "what": "x"}
     location = {"id": "location", "name": "위치정보", "evidence": [line], "model_citations": []}
-    record, unsure = _duty("locinfo-16-2"), rv.said({"applies": "모름", "condition": "위치를 모은다"})
-    status, gate = rv.accept(record, unsure, "check-applicability", [], False, location)
+    ok = [{"file": "src/geo.ts", "line": 3, "text": "navigator.geolocation.getCurrentPosition(", "ok": True,
+           "why": "grounded"}]  # fmt: skip
+    record = _duty("locinfo-16-2")
+    seen = rv.said({"applies": "예", "condition": "위치를 모아 서버로 보낸다"})
+    status, gate = rv.accept(record, seen, "check-applicability", ok, False, location)
     assert status == "seen-in-code" and gate["from"] == "check-applicability" and gate["why"] == "condition-present"
-    # 확인되지 않은 기능(신호 줄도 받은 인용도 없음), 기능을 뺀 경우, 그 밖의 의무는 그대로다
-    bare = {**location, "evidence": []}
-    assert rv.accept(record, unsure, "check-applicability", [], False, bare) == ("check-applicability", None)
+    # 조사 답이 그 처리가 저장소에 있다고 보고(applies 예) 인용했을 때만 올린다. "처리가 저장소에 없다"(applies 모름,
+    # 11/13 3배치 실측: 외부 판매 링크만 있는 책 SNS), 인용 없음, 기능을 뺀 경우, 그 밖의 의무는 그대로다
+    unsure = rv.said({"applies": "모름", "condition": "주문·결제 처리가 저장소에 없다"})
+    assert rv.accept(record, unsure, "check-applicability", ok, False, location) == ("check-applicability", None)
+    assert rv.accept(record, seen, "check-applicability", [], False, location) == ("check-applicability", None)
     gone = {**location, "removed": {}}
-    assert rv.accept(record, unsure, "check-applicability", [], False, gone) == ("check-applicability", None)
-    assert rv.accept(_duty("locinfo-19-4"), unsure, "check-applicability", [], False, location)[0] == (
+    assert rv.accept(record, seen, "check-applicability", ok, False, gone) == ("check-applicability", None)
+    assert rv.accept(_duty("locinfo-19-4"), seen, "check-applicability", ok, False, location)[0] == (
         "check-applicability"
     )
     # 서버만인 저장소면 화면이 하는 의무는 저장소 밖이다(위치 이용약관 공개)
     terms = _duty("locinfo-12-1")
-    status, gate = rv.accept(terms, unsure, "check-applicability", [], False, location, "screen")
+    status, gate = rv.accept(terms, seen, "check-applicability", ok, False, location, "screen")
     assert status == "check-outside" and gate["why"] == "other-side" and gate["from"] == "check-applicability"
 
 
@@ -771,8 +787,9 @@ def test_a_relabelled_guess_cannot_raise_an_item_the_guess_gate_moved(tmp_path):
     올리려면 그 정보를 받는 입력란·필드·저장 코드의 인용이 관문을 통과하고 applies 가 '예'여야 한다."""
     root = _repo(tmp_path)
     d = _duty("pipa-23-1")
-    guessed = rv.said({"applies": "모름", "condition": "채팅에 쓸 수 있다", "trigger": "자유 입력 추측"})
-    status, gate = rv.accept(d, guessed, "check-applicability", [], False, None)
+    guessed = rv.said({"applies": "예", "condition": "채팅에 쓸 수 있다", "trigger": "자유 입력 추측"})
+    ok = [{"file": "a.ts", "line": 1, "text": "x", "ok": True, "why": "grounded"}]
+    status, gate = rv.accept(d, guessed, "seen-in-code", ok, False, None)
     f = {"status": status, "gate": gate}
     assert status == "likely-not-applicable" and gate["why"] == "free-input"
     relabel = _flip("확인할 것(해당 여부)", [STORE], applies="모름", trigger="입력란·처리·저장")
@@ -789,7 +806,7 @@ def test_a_relabelled_guess_cannot_raise_an_item_the_guess_gate_moved(tmp_path):
 
     # 반박 질문에 그 조건을 적는다
     def guessing(_duty_id):
-        return ("확인할 것(해당 여부)", [], [], {"applies": "모름", "trigger": "자유 입력 추측"})
+        return ("확인할 것(코드에서 본 것)", [STORE], [], {"applies": "예", "trigger": "자유 입력 추측"})
 
     _, log = _run(root, "duty", use_static=False, investigator=fake_investigator(guessing))
     assert any("자유 입력 추측뿐이었다" in p for p in log)
@@ -852,3 +869,26 @@ def test_the_same_model_cannot_raise_an_item_to_evidence_found(tmp_path):
     held = [i for i in same["checklist"] if (i["verification"].get("gate") or {}).get("why") == "same-model"]
     assert raised and {i["duty"] for i in held} == {i["duty"] for i in raised}
     assert all(i["status"] != "evidence-found" for i in held)
+
+
+def test_the_rebuttal_can_be_turned_off_and_the_report_says_so(tmp_path):
+    """반박을 끄면 묻지 않는다. 결과에 남는다: run.rebut false, models.verify none, 반박할 항목의 verification 은
+    not-run(why rebut-off). 기본은 켬(웹이 쓰는 값)이다."""
+    assert rv.Limits().rebut
+    log: list = []
+    doc = rv.review(
+        _repo(tmp_path),
+        AgentJudge("claude-haiku-5-5", fake_investigator()),
+        AgentJudge("claude-sonnet-5-5", fake_checker(log)),
+        rv.Limits(usd=5.0, seconds=300, concurrency=2, batch="duty", rebut=False),
+        use_static=False,
+    )
+    _valid(doc)
+    assert not log and not any(q["stage"] == "rebut" for q in doc["run"]["questions"])
+    assert doc["run"]["rebut"] is False and doc["run"]["models"]["verify"] == "none"
+    asked = [i for i in doc["checklist"] if i["first"] and i["status"] in (*rv.DROPS, *rv.TO_CHECK)]
+    assert asked and all(i["verification"] == {"result": "not-run", "why": "rebut-off"} for i in asked)
+    from policypack.cli import build_parser
+
+    assert build_parser().parse_args(["review", ".", "--no-rebut"]).no_rebut
+    assert not build_parser().parse_args(["review", "."]).no_rebut

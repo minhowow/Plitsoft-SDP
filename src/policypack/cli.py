@@ -149,6 +149,9 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--model", default="anthropic:claude-haiku-5-5", help="이해·근거 찾기 모델")
     rv.add_argument("--checker", default="anthropic:claude-sonnet-5-5", help="반박 검증 모델(다른 모델을 쓴다)")
     rv.add_argument(
+        "--no-rebut", action="store_true", help="반박 검증을 묻지 않는다(결과의 run.rebut 이 false, 비용이 약 절반)"
+    )
+    rv.add_argument(
         "--batch",
         default="duty",
         choices=["duty", "feature"],
@@ -857,13 +860,14 @@ def cmd_review(args) -> int:
     throttles = (rv.Throttle(args.concurrency), rv.Throttle(args.concurrency))
     try:
         investigator = rv.build_judge(args.model, throttles[0])
-        checker = rv.build_judge(args.checker, throttles[1])
+        checker = investigator if args.no_rebut else rv.build_judge(args.checker, throttles[1])
     except ValueError as e:
         raise ConfigError(str(e)) from e
     from policypack.judge.http import endpoint
 
+    check = "끔" if args.no_rebut else args.checker
     print(
-        f"검토({args.model}, 반박 {args.checker}, 묶음 {args.batch}): 모델이 읽은 파일의 코드가 "
+        f"검토({args.model}, 반박 {check}, 묶음 {args.batch}): 모델이 읽은 파일의 코드가 "
         f"{_redact(endpoint())} 로 나갑니다(비밀값은 가리고 .env 등은 읽지 않음). "
         f"상한 ${args.max_usd:g}·{args.time_limit:g}초",
         file=sys.stderr,
@@ -877,7 +881,7 @@ def cmd_review(args) -> int:
         before, now = (reuse.get("profile") or {}).get("commit"), rv.commit_of(root.resolve())
         if before and now and before != now:
             print(f"알림: --reuse 의 커밋({before[:12]})과 지금 커밋({now[:12]})이 다릅니다", file=sys.stderr)
-    limits = rv.Limits(args.max_usd, args.time_limit, args.concurrency, args.batch)
+    limits = rv.Limits(args.max_usd, args.time_limit, args.concurrency, args.batch, rebut=not args.no_rebut)
     doc = rv.review(
         root, investigator, checker, limits, use_static=not args.no_static, throttles=throttles, reuse=reuse
     )

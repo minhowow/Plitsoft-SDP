@@ -21,11 +21,11 @@
      충족(덧붙임)          인용이 조문이 요구하는 행위 자체여야 한다(shows '행위'). 이름·기본값뿐이면 '코드에서 본 것'
      걸리는지 모름         '확인할 것'이라도 applies '모름'이면 '해당 여부부터 확인할 것'(그 기능이 있으면 걸리는
                            의무는 빼고)
-     해당 여부(덧붙임)     그 기능이 있으면 걸리는 의무를 '해당 여부'로 답해도 기능이 인용과 함께 확인돼 있으면
-                           '코드에서 본 것'
+     해당 여부(덧붙임)     그 기능이 있으면 걸리는 의무를 '해당 여부'로 답해도 그 기능의 처리가 저장소에 있다고
+                           보고(applies 예) 인용했으면 '코드에서 본 것'
      자유 입력 추측        이용자가 자유 입력·사진에 넣을 수 있다는 것(trigger '자유 입력 추측')은 걸리는 조건이
-                           아니다. 그것뿐인 '확인할 것'은 '걸리지 않는 것으로 보임', 그것을 근거로 한 반박의 뒤집기는
-                           받지 않는다
+                           아니다. 그것뿐인 '코드에서 본 것'(applies 모름이 아닐 때)은 '걸리지 않는 것으로 보임',
+                           그것을 근거로 한 반박의 뒤집기는 받지 않는다. 해당 여부·저장소 밖은 그대로
      반대쪽 의무           저장소가 서버만 또는 화면만이면 반대쪽이 하는 의무(features.yaml 의 sides)의 '코드에서
                            본 것'은 '저장소 밖에서 확인할 것'
      금지 의무             표의 prohibition("~하지 말 것")은 금지된 행위 자체의 인용(shows '금지 행위')이 있어야
@@ -34,12 +34,13 @@
    있는 줄은 받는다(why: config-value). 요건은 조문 인용에 있는 것만 묻는다.
    특정 품목(주류·도서 등, features.yaml 의 goods) 의무는 프로필에 그 품목 신호가 없으면 묻지 않고 '해당 여부부터
    확인할 것'에 한 묶음(group: goods)으로 싣는다. AI 사전 고지·결과물 표시(features.yaml 의 generative)는 생성형 AI
-   신호가 없으면(분류·인식 모델만, 또는 경로 낱말·이해 단계의 말뿐) 묻지 않고 '해당 여부부터'로 싣는다(not-generative).
+   신호(프로필의 SDK 꾸러미·import·호출·주소)가 없으면 묻지 않고 '해당 여부부터'로 싣는다(not-generative).
 5. 반박: 다른 모델이 빼는 답(충족·해당 없음·걸리지 않는 것으로 보임)에는 "지키지 않은 곳을 찾아라", 코드에서 본 것과
    저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다
    (judge_rebut: 자유 입력 관문이 옮긴 항목은 입력란·필드·저장의 인용 없이, 금지 의무는 금지 행위의 인용 없이 깨지
    못하고, 조사와 반박이 같은 모델이면 '충족'으로 올리지 못한다). 앞
-   판단이 조문에 없는 요건을 들었는지도 적는다(off_quote). 해당 여부는 사업자의 판단이라 반박하지 않는다.
+   판단이 조문에 없는 요건을 들었는지도 적는다(off_quote). 해당 여부는 사업자의 판단이라 반박하지 않는다. 반박을 끄면
+   (Limits.rebut, CLI --no-rebut) 묻지 않고 verification 은 not-run(why rebut-off), run.rebut 은 false 다.
 6. 체크리스트는 상태의 갈래 순(코드에서 본 것이 맨 위), 그 안에서는 거의 모든 서비스·가입·AI·외부 전송 순이다.
    기능 안에서는 핵심 의무(일반 범위 → 흔한 것 → 확신 높은 것)가 먼저이고 품목 의무가 맨 뒤다. 묻는 순서도 같아서
    상한에 걸려도 핵심은 묻는다. `summary` 에 갈래별 수와 맨 위 다섯 건, 묶음(groups)이 있다.
@@ -203,6 +204,7 @@ class Limits:
     seconds: float = 360.0
     concurrency: int = 6
     batch: str = "duty"  # duty | feature. 11/11 실측(사례 4곳): duty 가 의무마다 인용이 많고 비용은 1.8배, 시간은 비슷
+    rebut: bool = True  # False 면 반박을 묻지 않는다(verification not-run, why rebut-off). 웹의 기본은 켬
 
 
 # ── 인용 ─────────────────────────────────────────────────────────────
@@ -280,33 +282,13 @@ def _always(d: dict, feature: dict | None) -> bool:
     return d["id"] in _whenever() and _present(feature)
 
 
-def _confirmed(feature: dict | None) -> bool:
-    """기능이 인용과 함께 확인돼 있다(프로필 신호의 줄 또는 관문을 통과한 이해 단계의 인용)."""
-    return _present(feature) and (bool(feature["evidence"]) or any(c.get("ok") for c in feature["model_citations"]))
-
-
-def _generative_line(text: str) -> bool:
-    """줄에 생성형 AI 신호(genai 의 호출·주소, 또는 따옴표·import 안의 꾸러미 이름)가 글자 그대로 있다."""
-    sig = next(f for f in load_features()["features"] if f["id"] == "genai")["signals"]
-    if any(x in text for x in (*sig.get("calls", []), *sig.get("urls", []))):
-        return True
-    for pkg in sig.get("packages", []):
-        if len(pkg) > 2 and re.search(rf"""['"]{re.escape(pkg)}|\b(from|import)\s+{re.escape(pkg)}\b""", text):
-            return True
-    return False
-
-
 def generative(feature: dict | None) -> bool:
-    """생성형 AI 신호가 있다: 프로필 신호의 꾸러미·import·호출·주소, 내장 팩의 정적 검사, 또는 그 신호와 같은 글자가
-    있는 이해 단계의 인용. 경로 낱말(ai·gpt)과 이해 단계의 말만으로는 아니다(11/13 실측: 포즈 분류 모델을 'AI 기능'으로
-    더했다)."""
-    if not _present(feature):
-        return False
-    if any(e.get("signal") in ("package", "import", "call", "url") for e in feature["evidence"]):
-        return True
-    if "static" in feature["sources"]:
-        return True
-    return any(c.get("ok") and _generative_line(str(c.get("text") or "")) for c in feature["model_citations"])
+    """생성형 AI 신호가 있다: 프로필 신호(SDK 꾸러미·import·호출·주소)로만 정한다. 경로 낱말(ai·gpt), 이해 단계가 더한
+    것, 내장 팩의 정적 검사만으로는 아니다(11/13 실측: 포즈 분류 모델을 'AI 기능'으로 더했고, 정적 검사가 피드 화면의
+    JSX 한 줄을 AI 호출로 잡았다)."""
+    return _present(feature) and any(
+        e.get("signal") in ("package", "import", "call", "url") for e in feature["evidence"]
+    )
 
 
 def lacks(root: Path, platforms: list[str]) -> str | None:
@@ -442,11 +424,14 @@ def accept(
 def _accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None):
     if answered == "not-applicable":
         return absent(d, s, proven, feature, grounded(cs))
-    if answered != "evidence-found" and (gate_ := guess(d, s, answered, feature)):
+    if answered == "seen-in-code" and s["applies"] != "모름" and (gate_ := guess(d, s, answered, feature)):
+        # '코드에서 본 것' 후보를 내릴 때만 쓴다. '해당 여부'(사업자인지 모름 등)는 그대로 둔다(11/13 실측: 모델이 이
+        # 표시를 "사업자 해당 여부를 모른다"는 뜻으로 달아 '해당 여부'가 '걸리지 않는 듯'으로 내려갔다)
         gate_["note"] += " '걸리지 않는 것으로 보임'으로 옮겼습니다."
         return "likely-not-applicable", gate_
-    if answered == "check-applicability" and _always(d, feature) and _confirmed(feature):
-        # 11/13 실측: 위치 기능이 있는데 확인자료 기록 의무를 '해당 여부'로 답해 그대로 남았다
+    if answered == "check-applicability" and _always(d, feature) and s["applies"] == "예" and grounded(cs):
+        # 조사 답이 그 기능의 처리가 저장소에 있다고 보고(applies 예) 그 줄을 인용했을 때만 올린다. "결제·주문 처리가
+        # 저장소에 없다"(외부 판매 링크만)는 답은 '해당 여부'에 남는다(11/13 실측: 책 SNS 의 상거래 의무 5건)
         note = f"{feature['name']} 기능이 있으면 걸리는 의무라 '해당 여부'가 아니라 '코드에서 본 것'으로 옮겼습니다"
         return "seen-in-code", {"from": answered, "why": "condition-present", "note": _missing(note, s)}
     if answered in TO_CHECK and (gate_ := unknown(d, s, answered, feature)):
@@ -835,6 +820,8 @@ def rebut(
     items = [d for d in group if first.get(d["id"], {}).get("status") in (*DROPS, *TO_CHECK)]
     if not items:
         return {}
+    if not run.limits.rebut:
+        return {d["id"]: {"result": "not-run", "why": "rebut-off"} for d in items}
     budget = _budget(len(items), 15, 3, 35)
     blocks = []
     for d in items:
@@ -1190,7 +1177,11 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
         },
         "checklist": checklist,
         "run": {
-            "models": {"investigate": run.investigator.model, "verify": run.checker.model},
+            "models": {
+                "investigate": run.investigator.model,
+                "verify": run.checker.model if run.limits.rebut else "none",
+            },
+            "rebut": run.limits.rebut,
             "batch": run.limits.batch,
             # 저장소에 없는 쪽(screen: 서버만, server: 화면만). 그쪽 의무의 '코드에서 본 것'은 '저장소 밖'으로 옮긴다
             "lacks": run.lacks,
