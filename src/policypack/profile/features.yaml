@@ -31,6 +31,17 @@
 # goods — 특정 품목을 팔 때만 걸리는 의무. 그 품목의 신호(paths, 그리고 서비스 소스의 글에 그대로 있는 낱말 words)가
 #   없으면 묻지 않고 체크리스트의 '해당 여부부터 확인할 것' 맨 뒤에 한 묶음(group: goods)으로 싣는다. 신호가 있으면 기능
 #   안에서 맨 뒤에 묻는다(11/12 실측: 상한에 걸린 POS 가 농산물 원산지를 묻고 탈퇴·해지는 묻지 못했다).
+#
+# generative — 생성형 AI 신호가 있을 때만 묻는 의무(AI 사전 고지·결과물 표시). 생성형 신호는 genai 신호 가운데 꾸러미·
+#   import·호출·주소, 내장 팩의 정적 검사, 그리고 그 신호와 같은 글자(호출·주소·꾸러미 이름)가 있는 이해 단계의 인용이다.
+#   경로 낱말(ai·gpt 등)과 이해 단계의 말만으로는 생성형이 아니다. 생성형 신호 없이 AI 기능(genai)이나 그 밖의 AI(ai-model)만
+#   있으면 묻지 않고 '해당 여부부터 확인할 것'으로 싣는다(11/13 실측: 포즈 분류 모델을 'AI 기능'으로 보고 생성형 AI 결과물
+#   표시를 '코드에서 본 것'으로 고정했다).
+#
+# sides — 화면이 하는 의무(screen: 고지·동의 화면·표시·게시)와 서버가 하는 의무(server: 저장·암호화·접근 제한·기록·파기).
+#   저장소가 서버만 또는 화면만이면(profile 의 platforms 와 다른 언어의 서버 파일로 가른다), 반대쪽이 하는 의무는 이 저장소에
+#   지킨 처리가 없어도 '코드에서 본 것'이 아니라 '저장소 밖에서 확인할 것'이다(11/13 실측: 앱 서버 저장소에서 약관 고지·동의
+#   고지를 '코드에서 본 것'으로 뒀다). 양쪽이 함께 하는 의무(전송 암호화, 공개 설정 등)는 넣지 않는다.
 
 common:
   name: 거의 모든 서비스
@@ -51,6 +62,23 @@ common:
 
 status:
   name: 지위에 따라 걸리는 의무
+
+sides:
+  screen: [tcra-3-2, pipa-15-2, pipa-17-2, pipa-26-2, pipa-28-8-2, aiact-31-1, aiact-31-2, aiact-31-3, aiact-decree-27-1,
+           fla-endorse-5-5, fla-endorse-5-6, ecom-8-2, ecom-decree-9-1, ecom-10-1, ecom-13-1, ecom-13-2-h5, ecom-13-3,
+           ecom-17-6, ecom-20-1, ecom-20-4-3, ecom-21-2-1-h1, ecom-21-2-1-h2, ecom-21-2-1-h5, ecom-21-4-1, ecom-rule-7-2,
+           elec-safety-9-4, elec-safety-18-4, elec-safety-25-4, elec-safety-36-1, agri-origin-5-1, agri-origin-r3-b3-2,
+           publishing-22-3, locinfo-12-1, locinfo-19-1, locinfo-19-2, gameact-33-1, gameact-33-2, gameact-decree-8-3-7,
+           gameact-decree-8-3-8, filmvideo-dec-27-0-3-b3-2, filmvideo-dec-27-0-3-b3-3, filmvideo-dec-27-0-3-b3-6,
+           youth-13-1, copyright-103-4, creditinfo-32-4, creditinfo-34-2-1, jobsec-decree-28-h5, dincl-19-2,
+           disc-decree-14-2-h1, dvnotice-13-1, perfact-dec-3-3-h1-da, perfact-dec-3-3-h1-ra, perfact-dec-3-3-h2-da,
+           perfact-dec-3-3-h2-ra, sportsact-dec-4-2-h1-da, sportsact-dec-4-2-h1-ra, sportsact-dec-4-2-h2-da,
+           sportsact-dec-4-2-h2-ra]
+  server: [pipa-29-1, safety-std-5-1, safety-std-5-4, safety-std-5-6, safety-std-6-2, safety-std-7-1, safety-std-7-2,
+           safety-std-8-1, cistd-annex4-4, ecom-decree-6-2-h3, locinfo-16-2, locinfo-23-1, locinfo-23-2, locinfo-24-4,
+           locinfo-std-6-5, netact-50-2, netact-50-7, netact-50-8, telecom-22-5-1, copyright-103-2, creditinfo-17-4,
+           creditinfo-20-2, creditinfo-20-2-1, creditinfo-20-2-2, creditinfo-40-2-8, creditinfo-decree-16-1-h3,
+           credsup-b3-2-1-1, credsup-b3-2-2, credsup-b3-2-3-1, credsup-b3-2-3-4, lsa-42-0-0]
 
 features:
   - id: signup
@@ -195,7 +223,8 @@ features:
                   의료광고, 영상 광고, 주류 홍보, SW 제품 홍보, 클라우드 홍보, 매물 광고, 후기 게시, 인증 표시, 키오스크 판매]
 
   - id: genai
-    name: AI 기능(생성형 AI·자동화 결정)
+    # 고영향 AI·자동화 결정 의무도 이 기능에 붙어 있다(목록 층). 분류·인식 모델만 쓰면 ai-model 이다
+    name: 생성형 AI(LLM·생성 API 호출)
     signals:
       packages: [openai, "@anthropic-ai/sdk", "@google/generative-ai", "@google/genai", langchain, "@langchain/", ai,
                  "@ai-sdk/", replicate, "@huggingface/inference", cohere-ai, ollama, "@mistralai/mistralai", groq-sdk]
@@ -204,6 +233,16 @@ features:
       urls: [api.openai.com, api.anthropic.com, generativelanguage.googleapis.com]
     scope_notes: [생성형 AI, 고영향 AI, AI 합성물, AI 가상인물, 아동 챗봇, 자동화 결정, AI 음성·얼굴, 얼굴 합성]
     whenever: [aiact-31-1, aiact-31-2]
+    generative: [aiact-31-1, aiact-31-2]
+
+  - id: ai-model
+    # 붙는 의무가 없다. 이것만 있으면 generative 의무를 '해당 여부부터'로 싣는다
+    name: 그 밖의 AI(분류·인식 모델)
+    signals:
+      packages: ["@tensorflow/", "@tensorflow-models/", "@teachablemachine/", "@mediapipe/", face-api.js,
+                 "@vladmandic/face-api", ml5, onnxruntime-web, onnxruntime-node, onnxruntime-react-native, tesseract.js,
+                 brain.js]
+      calls: [tmPose.load, tmImage.load, tf.loadLayersModel, tf.loadGraphModel]
 
   - id: external-transfer
     name: 외부 업체·국외로 개인정보 전송(외부 AI 포함)

@@ -21,9 +21,18 @@
      충족(덧붙임)          인용이 조문이 요구하는 행위 자체여야 한다(shows '행위'). 이름·기본값뿐이면 '코드에서 본 것'
      걸리는지 모름         '확인할 것'이라도 applies '모름'이면 '해당 여부부터 확인할 것'(그 기능이 있으면 걸리는
                            의무는 빼고)
-   시험·설정 파일의 줄은 인용으로 받지 않는다. 요건은 조문 인용에 있는 것만 묻는다.
+     해당 여부(덧붙임)     그 기능이 있으면 걸리는 의무를 '해당 여부'로 답해도 기능이 인용과 함께 확인돼 있으면
+                           '코드에서 본 것'
+     자유 입력 추측        이용자가 자유 입력·사진에 넣을 수 있다는 것(trigger '자유 입력 추측')은 걸리는 조건이
+                           아니다. 그것뿐인 '확인할 것'은 '걸리지 않는 것으로 보임', 그것을 근거로 한 반박의 뒤집기는
+                           받지 않는다
+     반대쪽 의무           저장소가 서버만 또는 화면만이면 반대쪽이 하는 의무(features.yaml 의 sides)의 '코드에서
+                           본 것'은 '저장소 밖에서 확인할 것'
+   시험 파일의 줄과 설정 파일의 줄은 인용으로 받지 않는다. 설정 파일이라도 주소(scheme://…)나 호스트 값이 글자 그대로
+   있는 줄은 받는다(why: config-value). 요건은 조문 인용에 있는 것만 묻는다.
    특정 품목(주류·도서 등, features.yaml 의 goods) 의무는 프로필에 그 품목 신호가 없으면 묻지 않고 '해당 여부부터
-   확인할 것'에 한 묶음(group: goods)으로 싣는다.
+   확인할 것'에 한 묶음(group: goods)으로 싣는다. AI 사전 고지·결과물 표시(features.yaml 의 generative)는 생성형 AI
+   신호가 없으면(분류·인식 모델만, 또는 경로 낱말·이해 단계의 말뿐) 묻지 않고 '해당 여부부터'로 싣는다(not-generative).
 5. 반박: 다른 모델이 빼는 답(충족·해당 없음·걸리지 않는 것으로 보임)에는 "지키지 않은 곳을 찾아라", 코드에서 본 것과
    저장소 밖에서 확인할 것에는 "지킨 근거를 찾아라"로 다시 본다. 뒤집는 답도 같은 조건(인용·검색)을 넘어야 받는다. 앞
    판단이 조문에 없는 요건을 들었는지도 적는다(off_quote). 해당 여부는 사업자의 판단이라 반박하지 않는다.
@@ -40,6 +49,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import subprocess
 import threading
@@ -51,7 +61,7 @@ from pathlib import Path
 
 from policypack import __version__
 from policypack.evaluate.agent_pass import gate
-from policypack.index.roles import SERVICE, classify
+from policypack.index.roles import SERVICE, Role, classify
 from policypack.judge.agent import AgentAnswer, AgentJudge, RepoTools
 from policypack.profile import load_duties, load_features, profile
 from policypack.review import prompts as P
@@ -71,10 +81,17 @@ TO_CHECK = ("seen-in-code", "check-outside")
 """반박이 "지킨 근거"를 찾는 상태. 해당 여부(check-applicability)는 사업자의 판단이라 묻지 않는다."""
 PLATFORM_KO = {"web": "웹", "mobile": "모바일 앱", "server": "서버"}
 NOT_ANSWERED = {"cost-cap": "저장소당 금액 상한에 걸려 묻지 못했습니다", "time-cap": "시간 상한에 걸렸습니다"}
+SERVER_LANGS = (".py", ".java", ".kt", ".go", ".rb", ".php", ".cs", ".rs", ".scala")
+"""JS·TS 밖의 서버 코드. profile 의 platforms 는 package.json 과 JS·TS 파일로 가르므로, 이 파일이 있으면 화면만인
+저장소로 보지 않는다(11/13: Excelerate 는 플랫폼이 웹뿐인데 Python 서버가 있다)."""
+_VALUE = re.compile(
+    r"[a-z][a-z0-9+.-]*://[^\s'\"`]+|\b(host|hostname|endpoint|domain)\w*['\"]?\s*[:=]\s*['\"]?[\w-]+(\.[\w-]+)+", re.I
+)
+"""설정 파일에서 인용으로 받는 줄: 주소(scheme://…)나 호스트 값이 글자 그대로 있다(Sentry DSN, API 주소, 메일 서버)."""
 GOODS_LABEL = "특정 품목을 판다면 확인할 것"
 FIRST_KEYS = (
     *("answered", "status", "citations", "searches"),
-    *("applies", "condition", "missing", "shows", "basis", "gate", "reason", "question"),
+    *("applies", "condition", "missing", "shows", "basis", "trigger", "gate", "reason", "question"),
 )
 PRICES = {
     "claude-opus-5-5": (4.0, 5.0, 0.20, 20.0),
@@ -188,16 +205,19 @@ class Limits:
 
 
 def check(root: Path, citations: list[dict]) -> list[dict]:
-    """인용 관문(agent_pass.gate)에 더해, 시험·픽스처·설정 파일의 줄은 받지 않는다(why: test-file)."""
+    """인용 관문(agent_pass.gate)에 더해, 시험·픽스처·설정 파일의 줄은 받지 않는다(why: test-file). 설정 파일이라도
+    주소나 호스트 값이 글자 그대로 있는 줄은 받는다(why: config-value. 11/13 실측: Sentry DSN 줄을 받지 않았다)."""
     out = gate(root, citations)
     for c in out:
         if c["ok"]:
             rel = c["file"].removeprefix("./").lstrip("/")
-            text = (root / rel).read_text(encoding="utf-8", errors="replace")
-            if classify(rel, text) not in SERVICE:
-                c["ok"], c["why"] = False, "test-file"
-            else:
+            role = classify(rel, (root / rel).read_text(encoding="utf-8", errors="replace"))
+            if role in SERVICE:
                 c["file"] = rel
+            elif role is Role.CONFIG and _VALUE.search(c["text"]):
+                c["file"], c["why"] = rel, "config-value"
+            else:
+                c["ok"], c["why"] = False, "test-file"
     return out
 
 
@@ -213,6 +233,16 @@ def _whenever() -> dict[str, str]:
 def _audience() -> dict[str, str]:
     """이용자가 누구인지(나이·본인·지역)에 걸리는 의무 → 기능 id (features.yaml 의 audience)."""
     return {d: f["id"] for f in load_features()["features"] for d in f.get("audience") or []}
+
+
+def _generative() -> dict[str, str]:
+    """생성형 AI 신호가 있을 때만 묻는 의무 → 기능 id (features.yaml 의 generative)."""
+    return {d: f["id"] for f in load_features()["features"] for d in f.get("generative") or []}
+
+
+def _sides() -> dict[str, set[str]]:
+    """화면이 하는 의무(screen)와 서버가 하는 의무(server) (features.yaml 의 sides)."""
+    return {k: set(v) for k, v in (load_features().get("sides") or {}).items()}
 
 
 def _goods() -> dict[str, dict]:
@@ -238,6 +268,69 @@ def _present(feature: dict | None) -> bool:
     return feature is not None and "removed" not in feature
 
 
+def _always(d: dict, feature: dict | None) -> bool:
+    """그 기능이 있으면 걸리는 의무이고 기능이 있다."""
+    return d["id"] in _whenever() and _present(feature)
+
+
+def _confirmed(feature: dict | None) -> bool:
+    """기능이 인용과 함께 확인돼 있다(프로필 신호의 줄 또는 관문을 통과한 이해 단계의 인용)."""
+    return _present(feature) and (bool(feature["evidence"]) or any(c.get("ok") for c in feature["model_citations"]))
+
+
+def _generative_line(text: str) -> bool:
+    """줄에 생성형 AI 신호(genai 의 호출·주소, 또는 따옴표·import 안의 꾸러미 이름)가 글자 그대로 있다."""
+    sig = next(f for f in load_features()["features"] if f["id"] == "genai")["signals"]
+    if any(x in text for x in (*sig.get("calls", []), *sig.get("urls", []))):
+        return True
+    for pkg in sig.get("packages", []):
+        if len(pkg) > 2 and re.search(rf"""['"]{re.escape(pkg)}|\b(from|import)\s+{re.escape(pkg)}\b""", text):
+            return True
+    return False
+
+
+def generative(feature: dict | None) -> bool:
+    """생성형 AI 신호가 있다: 프로필 신호의 꾸러미·import·호출·주소, 내장 팩의 정적 검사, 또는 그 신호와 같은 글자가
+    있는 이해 단계의 인용. 경로 낱말(ai·gpt)과 이해 단계의 말만으로는 아니다(11/13 실측: 포즈 분류 모델을 'AI 기능'으로
+    더했다)."""
+    if not _present(feature):
+        return False
+    if any(e.get("signal") in ("package", "import", "call", "url") for e in feature["evidence"]):
+        return True
+    if "static" in feature["sources"]:
+        return True
+    return any(c.get("ok") and _generative_line(str(c.get("text") or "")) for c in feature["model_citations"])
+
+
+def lacks(root: Path, platforms: list[str]) -> str | None:
+    """저장소에 없는 쪽: 서버만이면 'screen', 화면만(웹·모바일 앱, 다른 언어의 서버 파일도 없음)이면 'server'."""
+    if platforms == ["server"]:
+        return "screen"
+    if not platforms or "server" in platforms:
+        return None
+    from policypack.judge.agent import SKIP_DIRS
+
+    for _dir, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        if any(n.endswith(SERVER_LANGS) for n in filenames):
+            return None
+    return "server"
+
+
+SIDE_KO = {"screen": "화면", "server": "서버"}
+
+
+def other_side(d: dict, status: str, gate_: dict | None, lacking: str | None) -> tuple[str, dict | None]:
+    """저장소에 없는 쪽이 하는 의무의 '코드에서 본 것'은 '저장소 밖에서 확인할 것'이다."""
+    if status != "seen-in-code" or not lacking or d["id"] not in _sides().get(lacking, set()):
+        return status, gate_
+    where = SIDE_KO[lacking]
+    note = f"이 저장소에는 {where} 코드가 없어 {where}에서 하는 의무는 '저장소 밖에서 확인할 것'으로 옮겼습니다."
+    if gate_:
+        note = f"{gate_['note']} {note}"
+    return "check-outside", {"from": (gate_ or {}).get("from", "seen-in-code"), "why": "other-side", "note": note}
+
+
 def _feature_citations(root: Path, feature: dict) -> list[dict]:
     """기능이 있다는 근거를 인용 꼴로(why: profile). 이해 단계의 인용(관문 통과)이 먼저, 다음이 프로필 신호의 줄이다."""
     out = [c for c in feature.get("model_citations", []) if c.get("ok")]
@@ -251,11 +344,12 @@ def _feature_citations(root: Path, feature: dict) -> list[dict]:
 
 
 def said(r: dict) -> dict:
-    """답이 적은 걸리는 조건(applies·condition·basis), 없는 것(missing), 충족 인용의 성격(shows)."""
+    """답이 적은 걸리는 조건(applies·condition·basis·trigger), 없는 것(missing), 충족 인용의 성격(shows)."""
     return {
         "applies": r.get("applies") if r.get("applies") in P.APPLIES else None,
         "condition": str(r.get("condition") or "").strip()[:300],
         "basis": r.get("basis") if r.get("basis") in P.BASIS else None,
+        "trigger": r.get("trigger") if r.get("trigger") in P.TRIGGER else None,
         "missing": str(r.get("missing") or "").strip()[:300],
         "shows": r.get("shows") if r.get("shows") in P.SHOWS else None,
     }
@@ -265,7 +359,7 @@ def absent(d: dict, s: dict, proven: bool, feature: dict | None, cited: bool) ->
     """'해당 없음'은 걸리는 조건 자체가 없을 때만 받는다(11/12 실측: '약관이 아예 없다', '탈퇴 경로가 아예 없다',
     '위치 동의 철회 기능이 없다'를 해당 없음으로 읽었다 — 검색 관문은 줄 수만 맞춰 봐서 막지 못했다).
     (상태, 관문이 바꾼 까닭 또는 None)"""
-    if d["id"] in _whenever() and _present(feature):
+    if _always(d, feature):
         note = f"{feature['name']} 기능이 있으면 걸리는 의무라 '해당 없음'으로 받지 않았습니다"
         note += ". 지킨 처리는 찾지 못했습니다"
         return "seen-in-code", {"from": "not-applicable", "why": "condition-present", "note": _missing(note, s)}
@@ -296,7 +390,7 @@ def unknown(d: dict, s: dict, answered: str, feature: dict | None) -> dict | Non
     """걸리는지 모른다고 답한 '확인할 것'(applies '모름')은 해당 여부부터다(11/12 재실행: 외부 AI 호출을 '제3자
     제공'으로 보고 "제공인지 위탁인지는 개발자 판단"이라면서 '코드에서 본 것'에 뒀다). 그 기능이 있으면 걸리는 의무는
     그대로 둔다. 관문이 바꾼 까닭 또는 None."""
-    if s["applies"] != "모름" or (d["id"] in _whenever() and _present(feature)):
+    if s["applies"] != "모름" or _always(d, feature):
         return None
     note = "걸리는지 모른다고 답해(applies '모름') '해당 여부부터 확인할 것'으로 옮겼습니다."
     return {"from": answered, "why": "applies-unknown", "note": note}
@@ -306,10 +400,33 @@ def _missing(note: str, s: dict) -> str:
     return note + (f": {s['missing']}." if s["missing"] else ".")
 
 
-def accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None):
-    """모델이 고른 상태에 받는 조건을 건다. (상태, 관문이 바꾼 까닭 또는 None)"""
+def guess(d: dict, s: dict, answered: str, feature: dict | None) -> dict | None:
+    """걸리는 조건이 이용자가 자유 입력·사진에 넣을 수 있다는 추측뿐이다(trigger '자유 입력 추측'). 11/13 실측: 채팅
+    입력에 민감정보가, 인증 사진에 신분증이 들어올 수 있다며 '해당 없음'을 '해당 여부부터'로 뒤집었다. 그 기능이 있으면
+    걸리는 의무와 이용자가 누구인지에 걸리는 의무는 그대로 둔다. 관문이 바꾼 까닭 또는 None."""
+    if s["trigger"] != "자유 입력 추측" or _always(d, feature) or d["id"] in _audience():
+        return None
+    note = "이용자가 자유 입력·사진에 그 정보를 넣을 수 있다는 추측은 걸리는 조건이 아니라"
+    return {"from": answered, "why": "free-input", "note": note}
+
+
+def accept(
+    d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None, lacking: str | None = None
+):
+    """모델이 고른 상태에 받는 조건을 건다. `lacking` 은 저장소에 없는 쪽(lacks). (상태, 관문이 바꾼 까닭 또는 None)"""
+    return other_side(d, *_accept(d, s, answered, cs, proven, feature), lacking)
+
+
+def _accept(d: dict, s: dict, answered: str, cs: list[dict], proven: bool, feature: dict | None):
     if answered == "not-applicable":
         return absent(d, s, proven, feature, grounded(cs))
+    if answered != "evidence-found" and (gate_ := guess(d, s, answered, feature)):
+        gate_["note"] += " '걸리지 않는 것으로 보임'으로 옮겼습니다."
+        return "likely-not-applicable", gate_
+    if answered == "check-applicability" and _always(d, feature) and _confirmed(feature):
+        # 11/13 실측: 위치 기능이 있는데 확인자료 기록 의무를 '해당 여부'로 답해 그대로 남았다
+        note = f"{feature['name']} 기능이 있으면 걸리는 의무라 '해당 여부'가 아니라 '코드에서 본 것'으로 옮겼습니다"
+        return "seen-in-code", {"from": answered, "why": "condition-present", "note": _missing(note, s)}
     if answered in TO_CHECK and (gate_ := unknown(d, s, answered, feature)):
         return "check-applicability", gate_
     if answered in ("evidence-found", "seen-in-code") and not grounded(cs):
@@ -356,6 +473,7 @@ class Run:
     checker: AgentJudge
     limits: Limits
     spend: Spend
+    lacks: str | None = None
     questions: list[dict] = field(default_factory=list)
     t0: float = field(default_factory=time.monotonic)
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -609,8 +727,8 @@ def investigate(
         cs = check(run.root, P.citations_of(r))
         searches, proven = prove(run.root, P.searches_of(r))
         s = said(r)
-        status, gate_ = accept(by_id[r["duty"]], s, answered, cs, proven, feature)
-        if status == "seen-in-code" and not grounded(cs):
+        status, gate_ = accept(by_id[r["duty"]], s, answered, cs, proven, feature, run.lacks)
+        if (status == "seen-in-code" or (gate_ or {}).get("why") == "other-side") and not grounded(cs):
             cs = cs + _feature_citations(run.root, feature)  # 조건(기능)이 있다는 근거는 프로필 신호다
         reason = str(r.get("reason") or "")[:800]
         results[r["duty"]] = {
@@ -690,9 +808,14 @@ def rebut(
             continue
         # 빼는 답을 깨면 '코드에서 본 것'(인용 필요). 확인할 것을 깨면 충족(행위 자체를 보이는 인용) 또는 해당
         # 없음(걸리는 조건이 없다는 답과 검색 증명)이다. 해당 없음은 조사 답과 같은 관문(absent)을 넘어야 받는다
-        if before in DROPS:
+        free = guess(by_id[r["duty"]], s, claimed or "seen-in-code", feature) if before in DROPS else None
+        if free:  # 자유 입력 추측으로는 빼는 답을 깨지 못한다
+            free["note"] += " 뒤집기를 받지 않았습니다."
+            rec["gate"], after, ok = free, claimed or "seen-in-code", False
+        elif before in DROPS:
             rec["gate"] = unknown(by_id[r["duty"]], s, "seen-in-code", feature)
             after, ok = ("check-applicability" if rec["gate"] else "seen-in-code"), grounded(cs)
+            after, rec["gate"] = other_side(by_id[r["duty"]], after, rec["gate"], run.lacks)
         elif claimed == "evidence-found":
             after, ok = claimed, grounded(cs) and s["shows"] == "행위"
         else:
@@ -733,6 +856,23 @@ def _goods_item(d: dict, g: dict) -> dict:
         "searches": [],
         "question": f"{g['name']}도 판매하나요? 판매한다면 이 의무가 걸립니다.",
         "reason": f"{g['name']} 판매에만 걸리는 의무입니다. 코드에서 이 품목의 신호를 찾지 못해 묻지 않았습니다.",
+    }
+
+
+def _not_generative_item(d: dict) -> dict:
+    """생성형 AI 신호가 없어 묻지 않은 AI 사전 고지·결과물 표시. '해당 여부부터 확인할 것'에 싣는다."""
+    return {
+        **_base(d, []),
+        "status": "check-applicability",
+        "asked": False,
+        "not_answered": "not-generative",
+        "first": None,
+        "verification": {"result": "not-run", "why": "not-generative"},
+        "citations": [],
+        "searches": [],
+        "question": "이 서비스의 AI 가 글·이미지·음성을 만들어 내는 생성형 AI 이거나 고영향 AI 인가요? "
+        "그렇다면 이 의무가 걸립니다.",
+        "reason": "AI 기능은 있지만 생성형 AI 를 부르는 신호(꾸러미·호출·주소)를 찾지 못해 묻지 않았습니다.",
     }
 
 
@@ -800,9 +940,10 @@ def _blank(fid: str, name: str) -> dict:
 
 
 def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[dict], ...]:
-    """(기능 목록, 목록 층 의무, 검토 층 의무, 묻지 않는 품목 의무). 기능은 신호 + 이해 단계가 더한 것 − 뺀 것 + 정적
+    """(기능 목록, 목록 층 의무, 검토 층 의무, 묻지 않는 의무). 기능은 신호 + 이해 단계가 더한 것 − 뺀 것 + 정적
     검사가 찾은 것. 검토 층은 묻는 순서다(PRIORITY·기능 목록 순, 기능 안에서는 core_key). 품목 의무는 프로필에 그
-    품목 신호가 있을 때만 묻는다."""
+    품목 신호가 있을 때만, AI 사전 고지·결과물 표시는 생성형 AI 신호가 있을 때만 묻는다. 묻지 않는 의무는 품목 의무와,
+    AI 기능(genai·ai-model)은 있는데 생성형 신호가 없을 때의 그 두 의무다."""
     spec = load_features()
     names = {f["id"]: f["name"] for f in spec["features"]}
     duties = load_duties()
@@ -845,6 +986,13 @@ def select(prof: dict, und: dict, static: dict[str, list[dict]]) -> tuple[list[d
     goods, seen = _goods(), {g["id"] for g in prof.get("goods") or []}
     skipped = [d for d in review if d["id"] in goods and goods[d["id"]]["id"] not in seen]
     review = [d for d in review if d not in skipped]
+    if not generative(features.get("genai")):
+        gen = _generative()
+        review = [d for d in review if d["id"] not in gen]
+        if {"genai", "ai-model"} & {f["id"] for f in live}:
+            held = [by_id[d] for d in gen]
+            listed += [d for d in held if d not in listed]
+            skipped += held
     review.sort(key=lambda d: (order.get(d["feature"], rest.get(d["feature"], 99)), *core_key(d)))
     return list(features.values()), listed, review, skipped
 
@@ -872,7 +1020,8 @@ def plan(root: Path, use_static: bool = True) -> dict:
         "features": [f["id"] for f in features],
         "listed": len(listed),
         "review": len(review),
-        "goods_not_asked": len(skipped),
+        "goods_not_asked": sum(d["id"] in _goods() for d in skipped),
+        "not_generative": sum(d["id"] not in _goods() for d in skipped),
         "questions": {b: len(groups_of(review, b)) for b in ("feature", "duty")},
         "static_error": err,
     }
@@ -896,6 +1045,7 @@ def review(
     run = Run(root, investigator, checker, limits, Spend(limits.usd), t0=t0)
 
     prof = profile(root)
+    run.lacks = lacks(root, prof["platforms"])
     static, static_err = static_results(root) if use_static else ({}, None)
     catalog = {f["id"]: f["name"] for f in load_features()["features"]}
     und = from_previous(root, reuse, catalog) if reuse is not None else understand(run, prof, catalog)
@@ -919,7 +1069,7 @@ def review(
     goods = _goods()
     checklist = arrange(
         [_item(d, firsts.get(d["id"], {}), checks.get(d["id"]), static.get(d["id"], [])) for d in review_duties]
-        + [_goods_item(d, goods[d["id"]]) for d in skipped]
+        + [_goods_item(d, goods[d["id"]]) if d["id"] in goods else _not_generative_item(d) for d in skipped]
     )
     seconds = time.monotonic() - t0
     return _report(run, prof, und, features, listed, checklist, static, static_err, seconds, throttles)
@@ -991,6 +1141,8 @@ def _report(run: Run, prof, und, features, listed, checklist, static, static_err
         "run": {
             "models": {"investigate": run.investigator.model, "verify": run.checker.model},
             "batch": run.limits.batch,
+            # 저장소에 없는 쪽(screen: 서버만, server: 화면만). 그쪽 의무의 '코드에서 본 것'은 '저장소 밖'으로 옮긴다
+            "lacks": run.lacks,
             "limits": {"usd": run.limits.usd, "seconds": run.limits.seconds, "concurrency": run.limits.concurrency},
             "seconds": round(seconds, 1),
             "calls": sum(q.get("calls", 0) for q in run.questions),

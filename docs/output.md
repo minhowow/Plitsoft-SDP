@@ -110,19 +110,19 @@ Quality(`--output-format gitlab`)는 그 형식의 규격을 따르고, 지문�
 | `data_flow` | 개인정보 흐름. `nodes[]`(input·server·store·external, 다루는 항목 `data`, 인용) 와 `edges[]`(from→to). 인용이 관문을 통과한 것만 |
 | `obligations.listed[]` | 목록 층: 감지된 기능과 거의 모든 서비스에 걸릴 수 있는 의무. `in_checklist` 는 검토 층에 들었는지 |
 | `checklist[]` | 검토 층. 이미 갈래 순으로 늘어서 있고 `rank` 가 1 부터다. 의무마다 `status`·`status_label`, 인용 `citations`, 부재를 보인 검색 `searches`, 개발자에게 물을 `question`, 조사 모델의 첫 답 `first`, 반박 `verification`(upheld · overturned · overturn-ungrounded · not-run, 조문 밖 요건이었는지 `off_quote`), 내장 팩 정적 결과 `static`, 조건은 있는데 없는 지킨 처리 `missing`(예: "약관 고지 화면이 없음"), 묻지 않은 품목 의무의 묶음 `group`(goods) |
-| `first`·`verification` 의 덧붙임(11/12) | 답이 적은 걸리는 조건 `applies`(예·아니오·모름)·`condition`, 없는 것 `missing`, 충족 인용의 성격 `shows`(행위·이름·기본값), 관문이 답을 바꾼 까닭 `gate`(`why`: condition-present · no-condition · name-or-default · audience · missing-check · applies-unknown, `note` 는 `reason` 앞에도 붙는다). '해당 없음'의 근거 `basis`(처리 없음·확인 장치 없음, 같은 날 덧붙임). 인용의 `why` 가 `profile` 이면 모델의 인용이 아니라 기능이 있다는 프로필 신호(걸리는 조건의 근거)다 |
-| `run` | 모델, 묶음, 상한, 시간, 호출 수, 사용량, 어림 금액(공식 단가를 호출마다 매겨 더한 값), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 검색과 다시 돌려 맞지 않은 수, 못 물은 의무(`not_asked`), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
+| `first`·`verification` 의 덧붙임(11/12) | 답이 적은 걸리는 조건 `applies`(예·아니오·모름)·`condition`, 없는 것 `missing`, 충족 인용의 성격 `shows`(행위·이름·기본값), 관문이 답을 바꾼 까닭 `gate`(`why`: condition-present · no-condition · name-or-default · audience · missing-check · applies-unknown · free-input · other-side, `note` 는 `reason` 앞에도 붙는다). '해당 없음'의 근거 `basis`(처리 없음·확인 장치 없음, 같은 날 덧붙임). 걸리는 조건을 본 곳 `trigger`(입력란·처리·저장 · 자유 입력 추측, 11/13 덧붙임). 인용의 `why` 가 `profile` 이면 모델의 인용이 아니라 기능이 있다는 프로필 신호(걸리는 조건의 근거)다. `config-value` 면 설정 파일의 줄이지만 주소·호스트 값이 있어 받은 인용이다 |
+| `run` | 모델, 묶음, 저장소에 없는 쪽(`lacks`: screen 이면 서버만, server 면 화면만), 상한, 시간, 호출 수, 사용량, 어림 금액(공식 단가를 호출마다 매겨 더한 값), 상태·반박 결과별 수, 인용과 관문이 거절한 수, 검색과 다시 돌려 맞지 않은 수, 못 물은 의무(`not_asked`), 가린 비밀값, 읽지 않은 비밀 파일, 질문마다의 기록 |
 
 상태(갈래 순):
 
 | status | 이름 | 받는 조건 |
 |---|---|---|
-| `seen-in-code` | 확인할 것 — 코드에서 본 것 | 걸리는 조건의 인용이 관문을 통과했다. 지킨 근거는 찾지 못했다(`missing`). 조건은 있는데 지킨 처리가 없다는 '해당 없음', 그 기능이 있으면 걸리는 의무(`features.yaml` 의 `whenever`)에 기능이 있는데 낸 '해당 없음', 이름·기본값뿐인 '충족'도 여기로 온다 |
-| `check-outside` | 확인할 것 — 저장소 밖에서 | 배포 설정·처리방침·저장소에 없는 서버를 봐야 한다. 인용이 관문을 통과하지 못한 '코드에서 본 것'·'충족'도 여기로 온다 |
-| `check-applicability` | 확인할 것 — 해당 여부부터 | 걸리는지가 사업자의 판단이다(고영향 AI, 사내 도구, 업종). 반박하지 않는다. 걸리는 조건이 없다는 말 없이 낸 '해당 없음', 걸리는지 모른다고 한(`applies` 모름) '확인할 것'(그 기능이 있으면 걸리는 의무는 빼고), 나이·본인·지역을 확인하는 장치가 없다는 것을 근거로 든 '해당 없음'(`basis` 확인 장치 없음)과 이용자가 누구인지에 걸리는 의무(`features.yaml` 의 `audience`: 아동·미성년자·청소년)의 '해당 없음', 품목 신호가 없어 묻지 않은 품목 의무(`not_answered` goods-not-detected, 갈래의 맨 뒤)도 여기다 |
+| `seen-in-code` | 확인할 것 — 코드에서 본 것 | 걸리는 조건의 인용이 관문을 통과했다. 지킨 근거는 찾지 못했다(`missing`). 조건은 있는데 지킨 처리가 없다는 '해당 없음', 그 기능이 있으면 걸리는 의무(`features.yaml` 의 `whenever`)에 기능이 있는데 낸 '해당 없음', 이름·기본값뿐인 '충족', 그 기능이 기능 신호·인용으로 확인됐는데 그 기능이 있으면 걸리는 의무에 낸 '해당 여부'도 여기로 온다 |
+| `check-outside` | 확인할 것 — 저장소 밖에서 | 배포 설정·처리방침·저장소에 없는 서버를 봐야 한다. 인용이 관문을 통과하지 못한 '코드에서 본 것'·'충족'도 여기로 온다. 저장소가 서버만 또는 화면만이면(`run.lacks`) 반대쪽이 하는 의무(`features.yaml` 의 `sides`)의 '코드에서 본 것'도 여기다(`gate` other-side) |
+| `check-applicability` | 확인할 것 — 해당 여부부터 | 걸리는지가 사업자의 판단이다(고영향 AI, 사내 도구, 업종). 반박하지 않는다. 걸리는 조건이 없다는 말 없이 낸 '해당 없음', 걸리는지 모른다고 한(`applies` 모름) '확인할 것'(그 기능이 있으면 걸리는 의무는 빼고), 나이·본인·지역을 확인하는 장치가 없다는 것을 근거로 든 '해당 없음'(`basis` 확인 장치 없음)과 이용자가 누구인지에 걸리는 의무(`features.yaml` 의 `audience`: 아동·미성년자·청소년)의 '해당 없음', 품목 신호가 없어 묻지 않은 품목 의무(`not_answered` goods-not-detected, 갈래의 맨 뒤), AI 기능은 있는데 생성형 AI 신호(꾸러미·import·호출·주소, 정적 검사, 그 글자가 있는 인용)가 없어 묻지 않은 AI 사전 고지·결과물 표시(`not_answered` not-generative)도 여기다 |
 | `unknown` | 모름(묻지 못함) | 상한·실패로 답이 없다. `not_answered` 에 까닭 |
 | `evidence-found` | 충족 근거 있음 | 조문이 요구하는 행위 자체를 보이는 줄(`shows` 행위)의 인용이 관문을 통과했다 |
-| `likely-not-applicable` | 걸리지 않는 것으로 보임(확인 안 됨) | 걸리는 조건 자체가 없다고 했지만(`applies` 아니오·`condition`·`basis` 처리 없음) 검색 증명이 없거나 맞지 않았다. 확인 목록에 올리지 않는다 |
+| `likely-not-applicable` | 걸리지 않는 것으로 보임(확인 안 됨) | 걸리는 조건 자체가 없다고 했지만(`applies` 아니오·`condition`·`basis` 처리 없음) 검색 증명이 없거나 맞지 않았다. 걸리는 조건이 이용자가 자유 입력·사진에 넣을 수 있다는 추측뿐인 '확인할 것'(`trigger` 자유 입력 추측)도 여기다. 그 추측으로 반박이 뒤집으려 하면 받지 않는다. 확인 목록에 올리지 않는다 |
 | `not-applicable` | 해당 없음(검색으로 확인) | 걸리는 조건 자체가 없다고 했고(`applies` 아니오·`condition`·`basis` 처리 없음), 그 조건을 찾은 검색(정규식·줄 수)을 도구가 저장소에서 다시 돌려 줄 수가 같았다 |
 
 - 인용은 시험·설정 파일의 줄이면 받지 않는다. 질문에 넣는 요건은 조문 인용에 있는 것만이다.

@@ -205,6 +205,12 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
     assert "removed" not in feats.get("auth", {})  # 인용 없이 빼지 못한다
     assert doc["profile"]["platforms"] == ["server"]  # express 만 있다. 화면 파일이 있어도 웹이 아니다
     assert "web-ui" not in feats
+    assert doc["run"]["lacks"] == "screen"  # 서버만이라 화면이 하는 의무의 '코드에서 본 것'은 저장소 밖이다
+    screen = rv._sides()["screen"]
+
+    def seen(duty: str) -> str:
+        return "check-outside" if duty in screen else "seen-in-code"
+
     assert [n["id"] for n in doc["data_flow"]["nodes"]] == ["n1", "n2", "n3"]
     assert [(e["from"], e["to"]) for e in doc["data_flow"]["edges"]] == [("n1", "n2")]
 
@@ -220,11 +226,15 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
             continue
         ok = any(c["ok"] for c in f["citations"])
         proven = bool(f["searches"]) and all(s["ok"] for s in f["searches"])
-        if f["answered"] in ("evidence-found", "seen-in-code"):
-            assert f["status"] == (f["answered"] if ok else "check-outside")
+        if f["answered"] == "evidence-found":
+            assert f["status"] == ("evidence-found" if ok else "check-outside")
+        if f["answered"] == "seen-in-code":
+            assert f["status"] == (seen(i["duty"]) if ok else "check-outside")
+            assert (f["gate"] or {}).get("why") == ("other-side" if ok and i["duty"] in screen else None)
         if f["answered"] == "not-applicable":
             if whenever.get(i["duty"]) in live:
-                assert f["status"] == "seen-in-code" and f["gate"]["why"] == "condition-present"
+                assert f["status"] == seen(i["duty"]) and f["gate"]["note"].startswith(feats[i["feature"]]["name"])
+                assert f["gate"]["why"] == ("other-side" if i["duty"] in screen else "condition-present")
                 assert any(c["ok"] for c in f["citations"]) and f["reason"].startswith(feats[i["feature"]]["name"])
             elif i["duty"] in rv._audience():  # 이용자가 누구인지에 걸리는 의무는 코드만으로 해당 없음이 아니다
                 assert f["status"] == "check-applicability" and f["gate"]["why"] == "audience"
@@ -246,7 +256,7 @@ def test_the_whole_path_runs_on_fake_answers_and_matches_the_schema(tmp_path, ba
     for i in flipped:
         before = i["first"]["status"]
         if before in rv.DROPS:
-            assert i["status"] == "seen-in-code"
+            assert i["status"] == seen(i["duty"])
         elif before == "seen-in-code":
             assert i["status"] == "evidence-found" and i["verification"]["shows"] == "행위"
         else:
@@ -456,12 +466,12 @@ def test_an_unknown_applicability_goes_to_check_applicability(tmp_path):
     doc, log = _run(_repo(tmp_path), "duty", use_static=False, investigator=fake_investigator(unsure_answer))
     _valid(doc)
     live = {f["id"] for f in doc["profile"]["features"] if "removed" not in f}
-    whenever = rv._whenever()
+    whenever, screen = rv._whenever(), rv._sides()["screen"]  # 픽스처는 서버만이다
     for i in doc["checklist"]:
         if not i["asked"]:
             continue
         if whenever.get(i["duty"]) in live:
-            assert i["first"]["status"] == "seen-in-code", i["duty"]
+            assert i["first"]["status"] == ("check-outside" if i["duty"] in screen else "seen-in-code"), i["duty"]
         else:
             assert i["status"] == "check-applicability" and i["first"]["gate"]["why"] == "applies-unknown", i["duty"]
             assert i["verification"] == {"result": "not-run", "why": "business-judgment"}
@@ -490,7 +500,10 @@ def test_an_unknown_applicability_goes_to_check_applicability(tmp_path):
     assert unsure and sure
     assert all(i["status"] == "check-applicability" for i in unsure)
     assert all(i["verification"]["gate"]["why"] == "applies-unknown" for i in unsure)
-    assert all(i["status"] == "seen-in-code" and i["verification"]["gate"] is None for i in sure)
+    for i in sure:  # 서버만인 저장소라 화면이 하는 의무는 저장소 밖이다
+        side = i["duty"] in screen
+        assert i["status"] == ("check-outside" if side else "seen-in-code"), i["duty"]
+        assert (i["verification"]["gate"] or {}).get("why") == ("other-side" if side else None)
     assert all(i["first"]["basis"] == "처리 없음" for i in flipped)  # 조사 답의 근거도 출력에 남는다
     kid = next(i for i in doc["checklist"] if i["duty"] == "pipa-22-2-1")  # 조사 답부터 해당 여부(audience)
     assert kid["status"] == "check-applicability" and kid["first"]["gate"]["why"] == "audience"
@@ -587,3 +600,156 @@ def test_a_cut_search_says_the_total_and_the_gate_matches_it(tmp_path):
     assert rv.prove(tmp_path, [{"pattern": "password", "hits": 80}])[1]
     assert not rv.prove(tmp_path, [{"pattern": "password", "hits": SEARCH_HITS}])[1]
     assert "맞는 줄은 모두" not in tools.search("nothing")
+
+
+def test_a_guess_about_free_input_is_not_a_condition(tmp_path):
+    """이용자가 자유 입력·사진에 그 정보를 넣을 수 있다는 추측은 걸리는 조건이 아니다(11/13 실측: 채팅 입력에
+    민감정보가, 인증 사진에 신분증이 들어올 수 있다며 반박이 '해당 없음'을 '해당 여부부터'로 뒤집었다). 조사 답이면
+    '걸리지 않는 것으로 보임', 반박의 뒤집기면 받지 않는다. 그 기능이 있으면 걸리는 의무와 이용자 의무는 그대로다."""
+    ok = [{"file": "a.ts", "line": 1, "text": "x", "ok": True, "why": "grounded"}]
+    signup = {"id": "signup", "name": "회원 가입·개인정보 수집", "evidence": [], "model_citations": []}
+    guess = rv.said({"applies": "모름", "condition": "채팅에 건강 정보를 쓸 수 있다", "trigger": "자유 입력 추측"})
+    for answered in ("seen-in-code", "check-outside", "check-applicability"):
+        status, gate = rv.accept(_duty("pipa-23-1"), guess, answered, ok, False, None)
+        assert status == "likely-not-applicable" and gate["why"] == "free-input" and gate["from"] == answered
+    assert rv.accept(_duty("tcra-3-2"), guess, "seen-in-code", ok, False, signup)[0] == "seen-in-code"
+    assert rv.accept(_duty("pipa-22-2-1"), guess, "check-applicability", ok, False, signup)[0] == "check-applicability"
+    field = rv.said({"applies": "예", "condition": "건강 상태 선택지가 있다", "trigger": "입력란·처리·저장"})
+    assert rv.accept(_duty("pipa-23-1"), field, "seen-in-code", ok, False, None) == ("seen-in-code", None)
+    assert all("자유 입력 추측" in t for t in (P.CONDITION, P.INVESTIGATE, P.REBUT))
+
+    # 반박: 증명 없는 해당 없음을 '자유 입력 추측'으로 깨면 받지 않고, 입력란·처리·저장으로 깨면 받는다
+    def drop(_duty_id):
+        return ("해당 없음", [], [PRESENT_BUT_CLAIMED_ZERO], NO_CONDITION)
+
+    def guessing_checker(body):
+        out = []
+        for d in re.findall(r"^- \[([^\]]+)\]", _text(body), re.M):
+            trigger = "자유 입력 추측" if zlib.crc32(d.encode()) % 2 == 0 else "입력란·처리·저장"
+            out.append(
+                {"duty": d, "result": "뒤집음", "status": "확인할 것(코드에서 본 것)", "applies": "예",
+                 "trigger": trigger, "citations": [STORE]}
+            )  # fmt: skip
+        return _reply({"results": out})
+
+    doc, _ = _run(
+        _repo(tmp_path), "duty", use_static=False, investigator=fake_investigator(drop), checker=guessing_checker
+    )
+    _valid(doc)
+    held = [i for i in doc["checklist"] if (i["verification"].get("gate") or {}).get("why") == "free-input"]
+    taken = [i for i in doc["checklist"] if i["verification"]["result"] == "overturned"]
+    assert held and taken
+    for i in held:
+        assert i["verification"]["result"] == "overturn-ungrounded" and i["verification"]["trigger"] == "자유 입력 추측"
+        assert i["status"] == "likely-not-applicable" and "받지 않았습니다" in i["verification"]["gate"]["note"]
+    assert all(i["verification"]["trigger"] == "입력란·처리·저장" for i in taken)
+
+
+def test_ai_notices_wait_for_a_generative_signal(tmp_path):
+    """AI 사전 고지·결과물 표시는 생성형 AI 신호(꾸러미·import·호출·주소, 정적 검사, 그 글자가 있는 인용)가 있을 때만
+    묻는다. 분류·인식 모델만 있거나 경로 낱말·이해 단계의 말뿐이면 묻지 않고 '해당 여부부터'다(11/13 실측: 포즈 분류
+    모델을 'AI 기능'으로 보고 생성형 AI 결과물 표시를 '코드에서 본 것'으로 고정했다)."""
+    cite = {"ok": True, "why": "grounded", "file": "Game.js", "line": 1}
+    predict = "const prediction = await this.state.model.predict(posenetOutput);"
+    pose = {"id": "genai", "name": "생성형 AI", "sources": ["model"], "evidence": [],
+            "model_citations": [{**cite, "text": predict}]}  # fmt: skip
+    assert not rv.generative(pose) and not rv.generative(None)
+    assert rv.generative({**pose, "model_citations": [{**cite, "text": "return client.chat.completions.create("}]})
+    assert rv.generative({**pose, "model_citations": [{**cite, "text": "from openai import OpenAI"}]})
+    assert not rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": "path", "value": "ai"}]})
+    assert rv.generative({**pose, "sources": ["signal"], "evidence": [{"signal": "package", "value": "openai"}]})
+    assert rv.generative({**pose, "sources": ["static"]})
+
+    gen = set(rv._generative())
+    assert gen == {"aiact-31-1", "aiact-31-2"}
+    pkg = {"dependencies": {"react": "18", "@teachablemachine/pose": "0.8"}}
+    (tmp_path / "package.json").write_text(json.dumps(pkg))
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "Game.jsx").write_text(
+        "export async function load(url) {\n  const model = await tmPose.load(url);\n  return model;\n}\n"
+    )
+    doc, _ = _run(tmp_path, "duty", use_static=False, investigator=fake_investigator(lambda d: ANSWERS[3]))
+    _valid(doc)
+    assert "ai-model" in {f["id"] for f in doc["profile"]["features"]}
+    asked = {d for q in doc["run"]["questions"] if q["stage"] == "investigate" for d in q["duties"]}
+    held = {i["duty"]: i for i in doc["checklist"] if i.get("not_answered") == "not-generative"}
+    assert set(held) == gen and not gen & asked
+    assert all(i["status"] == "check-applicability" and not i["asked"] and i["question"] for i in held.values())
+    assert gen <= {d["id"] for d in doc["obligations"]["listed"] if d["in_checklist"]}
+
+    # 생성형 꾸러미가 있으면 묻는다
+    pkg = {"dependencies": {"react": "18", "openai": "4"}}
+    (tmp_path / "package.json").write_text(json.dumps(pkg))
+    (tmp_path / "src" / "chat.ts").write_text('import OpenAI from "openai";\nexport const ai = new OpenAI();\n')
+    doc, _ = _run(tmp_path, "duty", use_static=False, investigator=fake_investigator(lambda d: ANSWERS[3]))
+    asked = {d for q in doc["run"]["questions"] if q["stage"] == "investigate" for d in q["duties"]}
+    assert gen <= asked and not any(i.get("not_answered") == "not-generative" for i in doc["checklist"])
+
+
+def test_a_whenever_duty_answered_as_applicability_goes_up_when_the_feature_is_confirmed():
+    """그 기능이 있으면 걸리는 의무를 '해당 여부'로 답해도, 기능이 인용과 함께 확인돼 있으면 '코드에서 본 것'이다(11/13
+    실측: 위치 기능이 있는데 확인자료 기록 의무를 '해당 여부'로 답해 그대로 남았다)."""
+    line = {"file": "src/geo.ts", "line": 3, "signal": "call", "value": "navigator.geolocation", "what": "x"}
+    location = {"id": "location", "name": "위치정보", "evidence": [line], "model_citations": []}
+    record, unsure = _duty("locinfo-16-2"), rv.said({"applies": "모름", "condition": "위치를 모은다"})
+    status, gate = rv.accept(record, unsure, "check-applicability", [], False, location)
+    assert status == "seen-in-code" and gate["from"] == "check-applicability" and gate["why"] == "condition-present"
+    # 확인되지 않은 기능(신호 줄도 받은 인용도 없음), 기능을 뺀 경우, 그 밖의 의무는 그대로다
+    bare = {**location, "evidence": []}
+    assert rv.accept(record, unsure, "check-applicability", [], False, bare) == ("check-applicability", None)
+    gone = {**location, "removed": {}}
+    assert rv.accept(record, unsure, "check-applicability", [], False, gone) == ("check-applicability", None)
+    assert rv.accept(_duty("locinfo-19-4"), unsure, "check-applicability", [], False, location)[0] == (
+        "check-applicability"
+    )
+    # 서버만인 저장소면 화면이 하는 의무는 저장소 밖이다(위치 이용약관 공개)
+    terms = _duty("locinfo-12-1")
+    status, gate = rv.accept(terms, unsure, "check-applicability", [], False, location, "screen")
+    assert status == "check-outside" and gate["why"] == "other-side" and gate["from"] == "check-applicability"
+
+
+def test_a_one_sided_repository_checks_the_other_side_outside(tmp_path):
+    """저장소가 서버만 또는 화면만이면 반대쪽이 하는 의무(화면 고지·동의 ↔ 서버 저장·암호화·제한)의 '코드에서 본 것'은
+    '저장소 밖에서 확인할 것'이다(11/13 실측: 앱 서버 저장소에서 약관 고지·동의 고지를 '코드에서 본 것'으로 뒀다).
+    화면만인지는 플랫폼과, JS·TS 밖의 서버 파일이 없는지로 가른다."""
+    assert rv.lacks(tmp_path, ["server"]) == "screen"
+    assert rv.lacks(tmp_path, ["web", "server"]) is None and rv.lacks(tmp_path, []) is None
+    assert rv.lacks(tmp_path, ["mobile"]) == "server"
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "backend" / "app.py").write_text("print(1)\n")
+    assert rv.lacks(tmp_path, ["web"]) is None  # Python 서버가 있다
+    sides = rv._sides()
+    assert not sides["screen"] & sides["server"]
+    ok = [{"file": "a.ts", "line": 1, "text": "x", "ok": True, "why": "grounded"}]
+    yes = rv.said({"applies": "예", "condition": "가입을 받는다", "missing": "약관 고지가 없음"})
+    terms, password = _duty("tcra-3-2"), _duty("safety-std-7-1")
+    status, gate = rv.accept(terms, yes, "seen-in-code", ok, False, None, "screen")
+    assert status == "check-outside" and gate == {**gate, "from": "seen-in-code", "why": "other-side"}
+    assert rv.accept(terms, yes, "seen-in-code", ok, False, None, "server") == ("seen-in-code", None)
+    assert rv.accept(password, yes, "seen-in-code", ok, False, None, "server")[0] == "check-outside"
+    assert rv.accept(password, yes, "evidence-found", ok, False, None, "server")[0] == "check-outside"  # 이름·기본값
+    act = rv.said({"applies": "예", "shows": "행위"})
+    assert rv.accept(password, act, "evidence-found", ok, False, None, "server") == ("evidence-found", None)
+
+
+def test_a_config_line_with_an_address_is_a_citation(tmp_path):
+    """설정 파일의 줄은 인용으로 받지 않지만, 주소나 호스트 값이 글자 그대로 있는 줄(Sentry DSN, API 주소)은 외부 전송의
+    근거로 받는다(11/13 실측: Sentry DSN 줄을 받지 않았다). 시험 파일은 그대로 받지 않는다."""
+    (tmp_path / "sentry.client.config.ts").write_text(
+        'Sentry.init({\n  dsn: "https://abc123@o45.ingest.us.sentry.io/45",\n  replaysSessionSampleRate: 0.1,\n});\n'
+    )
+    (tmp_path / "vite.config.ts").write_text('export default { server: { proxy: { host: "api.example.co.kr" } } };\n')
+    _repo(tmp_path)
+    cites = [
+        {"file": "sentry.client.config.ts", "line": 2, "text": 'dsn: "https://abc123@o45.ingest.us.sentry.io/45",'},
+        {"file": "sentry.client.config.ts", "line": 3, "text": "replaysSessionSampleRate: 0.1,"},
+        {"file": "vite.config.ts", "line": 1, "text": 'host: "api.example.co.kr"'},
+        TEST_LINE,
+    ]
+    out = rv.check(tmp_path, cites)
+    assert [(c["ok"], c["why"]) for c in out] == [
+        (True, "config-value"),
+        (False, "test-file"),
+        (True, "config-value"),
+        (False, "test-file"),
+    ]
